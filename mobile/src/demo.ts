@@ -66,6 +66,8 @@ type Demo = {
   detection: { key: string; label: string; mode: Mode | null; confidence: number | null } | null;
   hat: boolean;
   hatAsking: string | null;
+  caption: { phase: "asking"; text: string; status: string } | null;
+  frozen: string | null;
   ask: { status: "done"; question: string; answer: AskAnswer; id: number } | null;
 };
 
@@ -104,6 +106,8 @@ export function demoState(): Demo | null {
       q === "home" || q === "hat" ? { key: "harbor-table-menu", label: "Harbor Table menu", mode: "menu", confidence: 0.92 } : null,
     hat: q === "hat",
     hatAsking: null,
+    caption: q === "looking" ? { phase: "asking", text: "What does this sign say?", status: "Reading…" } : null,
+    frozen: q === "looking" ? uri : null,
     ask:
       q === "recent-ask"
         ? {

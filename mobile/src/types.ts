@@ -19,4 +19,6 @@ export type Shot = {
   followUps: FollowUp[];
   web: WebState;
   fromHistory?: boolean; // reopened from Recent: no photo data, so no follow-ups or retry
+  asked?: string;
+  key?: string; // frame-check key when read from the detection card (sent to analyze) // "ask while looking": the user's own words, shown at the top of the sheet
 };

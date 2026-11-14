@@ -52,6 +52,8 @@ export type AnalyzeResponse = {
   webQuery?: string;
   itemKind?: ItemKind;
   scanId?: string; // server-side history id; passed back to /api/lookup
+  interpreted?: { mode: Mode; question?: string; language?: string }; // how an utterance was read
+  autoLookup?: boolean; // "search for this": run /api/lookup right after
   error?: boolean;
 };
 

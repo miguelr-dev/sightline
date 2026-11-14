@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialAutoState, reduceFrame, markRead, type AutoState } from "./autoCapture";
+import { dismissCard, initialAutoState, lastSeen, matchKey, reduceFrame, resumeAfterSheet, sameItem, type AutoState } from "./autoCapture";
 import type { FrameCheck } from "../modes";
 
 const seen = (key: string, extra: Partial<FrameCheck> = {}): FrameCheck => ({
@@ -64,13 +64,65 @@ describe("detection card", () => {
     expect(m.card?.mode).toBeNull();
   });
 
-  it("after the user taps to read an item, hides it until the camera moves on", () => {
+});
+
+describe("fuzzy keys (same item, different wording)", () => {
+  it("matchKey keeps the distinctive words, sorted", () => {
+    expect(matchKey("calle-mayor-precaucion-sign")).toBe("calle-mayor-precaucion");
+    expect(matchKey("precaucion-calle-mayor-sign")).toBe("calle-mayor-precaucion");
+    expect(matchKey("menu-sign")).toBe("menu-sign"); // only type words: keep them
+  });
+
+  it("sameItem when two keys share a distinctive word", () => {
+    expect(sameItem("kirkland-tropical-energy-drink", "energy-drink-can")).toBe(true);
+    expect(sameItem("precaucion-calle-mayor-sign", "calle-mayor-precaucion-sign")).toBe(true);
+    expect(sameItem("nutter-butter-package", "laptop-keyboard")).toBe(false);
+    expect(sameItem("harbor-table-menu", "lunch-menu")).toBe(false); // "menu" alone is a type word
+  });
+
+  it("the card keeps its label while the same item's key wobbles", () => {
+    const { outs } = run([
+      seen("kirkland-tropical-energy-drink", { label: "Kirkland tropical energy drink" }),
+      seen("energy-drink-can", { label: "Energy drink can" }),
+    ]);
+    expect(outs[1].card?.label).toBe("Kirkland tropical energy drink");
+    expect(outs[1].appeared).toBe(false);
+  });
+
+  it("a different item still needs 2 frames, and wobbling keys for it count as the same", () => {
+    const { outs } = run([seen("nb"), seen("calle-mayor-sign"), seen("mayor-calle-precaucion")]);
+    expect(outs.map((o) => o.card?.key)).toEqual(["nb", "nb", "mayor-calle-precaucion"]);
+  });
+
+  it("lastSeen reports the card's key and label for the next frame-check", () => {
+    const { state } = run([seen("nb")]);
+    expect(lastSeen(state)).toEqual({ lastKey: "nb", lastLabel: "Nutter Butter Bites package" });
+    expect(lastSeen(initialAutoState)).toEqual({});
+  });
+});
+
+describe("rescanning and dismissing", () => {
+  it("after a result sheet closes, the same item is offered again at once", () => {
     let s = run([seen("nb")]).state;
-    s = markRead(s, "nb");
-    let r = run([seen("nb"), seen("nb")], s);
-    expect(r.outs.map((o) => o.card)).toEqual([null, null]);
-    r = run([nothing(), nothing(), nothing(), seen("nb")], r.state);
-    expect(r.outs[3].card?.key).toBe("nb");
+    s = resumeAfterSheet(s);
+    const r = reduceFrame(s, seen("nb"), 5000);
+    expect(r.card?.key).toBe("nb");
+    expect(r.appeared).toBe(true);
+  });
+
+  it("× hides only that item, for about 5 s", () => {
+    let s = run([seen("nb")]).state;
+    s = dismissCard(s, "nb", 1000);
+    expect(reduceFrame(s, seen("nb"), 2000).card).toBeNull();
+    expect(reduceFrame(s, seen("energy-drink-can"), 2000).card?.key).toBe("energy-drink-can");
+    const later = reduceFrame(s, seen("nb"), 6100);
+    expect(later.card?.key).toBe("nb");
+    expect(later.appeared).toBe(true);
+  });
+
+  it("× also hides the same item under a slightly different key", () => {
+    const s = dismissCard(run([seen("nutter-butter-bites")]).state, "nutter-butter-bites", 0);
+    expect(reduceFrame(s, seen("nutter-butter-package"), 1000).card).toBeNull();
   });
 });
 

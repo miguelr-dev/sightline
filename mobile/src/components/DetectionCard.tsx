@@ -3,6 +3,7 @@ import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { MODE_LABELS } from "../modes";
 import { colors, radius, type } from "../theme";
 import type { Detection } from "../useAutoCapture";
+import { Frost } from "./CameraChrome";
 import { Icon } from "./ui";
 
 // "Menu detected · Tap to read". One big button that slides up above Capture while auto mode sees
@@ -11,10 +12,12 @@ export function DetectionCard({
   detection,
   reduceMotion,
   onPress,
+  onDismiss,
 }: {
   detection: Detection | null;
   reduceMotion: boolean;
   onPress?: () => void; // without it the card is informational (hat camera mode)
+  onDismiss?: () => void; // × on the camera-screen pill
 }) {
   const [shown, setShown] = useState<Detection | null>(detection);
   const anim = useRef(new Animated.Value(detection ? 1 : 0)).current;
@@ -40,6 +43,48 @@ export function DetectionCard({
   const mode = shown.mode ? MODE_LABELS[shown.mode] : null;
   const title = shown.label;
   const spoken = /detected$/i.test(title) ? title : `${title} detected`;
+  const motion = {
+    opacity: anim,
+    transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+  };
+  if (onPress) {
+    // Camera screen: a compact frosted pill floating above the mode strip, with a × to dismiss.
+    return (
+      <Animated.View style={[motion, { alignSelf: "center", maxWidth: "100%" }]}>
+        <Frost style={s.pill}>
+          <Pressable
+            onPress={onPress}
+            disabled={!detection}
+            accessibilityRole="button"
+            accessibilityLabel={`${spoken}${mode ? `, ${mode}` : ""}`}
+            accessibilityHint="Reads it now"
+            style={({ pressed }) => [s.pillMain, pressed && { opacity: 0.7 }]}
+          >
+            <Icon sf="viewfinder" ion="scan-outline" size={20} color={colors.label} />
+            <View style={{ flexShrink: 1 }}>
+              <Text style={[type.headline, { color: colors.label }]} numberOfLines={1}>
+                {title}
+              </Text>
+              <Text style={[type.footnote, { color: "#3A3A3C", fontWeight: "600" }]} numberOfLines={1}>
+                Tap to read{mode ? ` · ${mode}` : ""}
+              </Text>
+            </View>
+          </Pressable>
+          {onDismiss ? (
+            <Pressable
+              onPress={onDismiss}
+              accessibilityRole="button"
+              accessibilityLabel={`Dismiss ${title}`}
+              hitSlop={6}
+              style={({ pressed }) => [s.close, pressed && { opacity: 0.6 }]}
+            >
+              <Icon sf="xmark" ion="close" size={14} weight="bold" color={colors.label} />
+            </Pressable>
+          ) : null}
+        </Frost>
+      </Animated.View>
+    );
+  }
   return (
     <Animated.View
       style={{
@@ -75,6 +120,16 @@ export function DetectionCard({
 }
 
 const s = StyleSheet.create({
+  pill: { flexDirection: "row", alignItems: "center", minHeight: 60, borderRadius: 30, paddingLeft: 18, paddingRight: 8 },
+  pillMain: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 56, flexShrink: 1, paddingRight: 8 },
+  close: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.08)",
+  },
   card: {
     minHeight: 72,
     flexDirection: "row",

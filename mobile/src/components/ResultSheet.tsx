@@ -102,6 +102,11 @@ export function ResultSheet(p: Props) {
             contentContainerStyle={[s.content, { paddingBottom: insets.bottom + 32 }]}
             keyboardShouldPersistTaps="handled"
           >
+            {shot?.asked ? (
+              <Text style={s.asked} accessibilityLabel={`You asked: ${shot.asked}`}>
+                “{shot.asked}”
+              </Text>
+            ) : null}
             {shot?.photo ? (
               <Image
                 source={{ uri: shot.photo.uri }}
@@ -379,6 +384,7 @@ const s = StyleSheet.create({
   done: { minHeight: MIN_TARGET, minWidth: MIN_TARGET, paddingHorizontal: 12, justifyContent: "center", alignItems: "center" },
   content: { paddingHorizontal: 20, paddingTop: 4, gap: 20 },
   photo: { width: "100%", borderRadius: radius.card, backgroundColor: colors.surface },
+  asked: { fontSize: 24, lineHeight: 31, fontWeight: "600", letterSpacing: -0.3, color: colors.label },
   looking: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 8 },
   lead: { fontSize: 22, lineHeight: 30, fontWeight: "400", letterSpacing: -0.26, color: colors.label },
   errorRow: { flexDirection: "row", gap: 10, alignItems: "flex-start" },

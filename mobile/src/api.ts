@@ -86,6 +86,8 @@ export async function analyze(req: {
   mode: Mode;
   language?: string;
   question?: string;
+  utterance?: string; // "ask while looking": what the user said with this fresh photo
+  key?: string; // frame-check key of the item, when reading from the detection card
 }): Promise<AnalyzeResponse> {
   const r = await postJson<AnalyzeResponse>("/api/analyze", req, 55_000);
   if (r.data && typeof r.data.spokenText === "string") {
@@ -93,6 +95,11 @@ export async function analyze(req: {
       ...r.data,
       sections: cleanSections(r.data.sections),
       scanId: typeof r.data.scanId === "string" && r.data.scanId ? r.data.scanId : undefined,
+      interpreted:
+        r.data.interpreted && typeof r.data.interpreted === "object" && MODES.includes(r.data.interpreted.mode)
+          ? r.data.interpreted
+          : undefined,
+      autoLookup: r.data.autoLookup === true,
     };
     return r.ok ? data : { ...data, error: true };
   }
@@ -197,6 +204,8 @@ export async function frameCheck(req: {
   image: string;
   mode: Mode;
   language?: string;
+  lastKey?: string; // the card's current item, so the server keeps the same key for it
+  lastLabel?: string;
 }): Promise<{ status: number; data: FrameCheck | null }> {
   const r = await postJson<FrameCheck>("/api/frame-check", req, 6000);
   if (!r.ok || !r.data || typeof r.data.ready !== "boolean") return { status: r.status, data: null };

@@ -5,11 +5,30 @@ import { MODES, type FrameCheck, type Mode } from "../modes";
 
 export type Detection = { key: string; label: string; mode: Mode | null; confidence: number | null };
 
+// ---- fuzzy keys (same as lib/hat.ts on the server) ----------------------------------------------
+// Frame-check names the same item differently from frame to frame ("kirkland-tropical-energy-drink",
+// "energy-drink-can"). Keys are compared by their distinctive words; sharing one means same item.
+const SKIP_WORDS = new Set(["menu", "package", "label", "sign", "page", "slide", "scene", "box"]);
+const FILLER = new Set(["the", "and", "for", "with"]);
+
+export function matchKey(key: string): string {
+  const words = [...new Set(key.toLowerCase().split("-"))].filter((w) => w.length >= 3 && !FILLER.has(w));
+  const named = words.filter((w) => !SKIP_WORDS.has(w));
+  return (named.length ? named : words.length ? words : [key.toLowerCase()]).sort().join("-");
+}
+
+export function sameItem(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  const B = new Set(matchKey(b).split("-"));
+  return matchKey(a)
+    .split("-")
+    .some((w) => B.has(w));
+}
+
 export type AutoState = {
   shown: Detection | null; // what the card shows
-  candidate: string | null; // a different key seen once while the card shows something else
-  readKey: string | null; // tapped and read; hidden until the camera moves on
-  readMisses: number;
+  candidate: string | null; // a different item seen once while the card shows something else
+  dismissed: { key: string; until: number } | null; // × on the card: hide this item briefly
   hint: { text: string; since: number } | null;
   lastHintAt: number;
 };
@@ -17,21 +36,19 @@ export type AutoState = {
 export const initialAutoState: AutoState = {
   shown: null,
   candidate: null,
-  readKey: null,
-  readMisses: 0,
+  dismissed: null,
   hint: null,
   lastHintAt: -Infinity,
 };
 
-const SWITCH_FRAMES = 2; // a different item must be seen this many frames in a row
-const READ_RESET_MISSES = 3; // frames without the read key before it can show again
+const DISMISS_MS = 5000;
 const HINT_REPEAT_MS = 3000;
 const HINT_GAP_MS = 5000;
 
 export type FrameOutcome = {
   state: AutoState;
-  card: Detection | null; // null = nothing detected in this frame (the card may fade)
-  appeared: boolean; // the card is new or changed item: haptic + VoiceOver announcement
+  card: Detection | null; // null = nothing to show for this frame (the card may fade)
+  appeared: boolean; // the card is new or a different item: haptic + VoiceOver announcement
   speakHint?: string;
 };
 
@@ -47,31 +64,22 @@ function toDetection(fc: FrameCheck): Detection | null {
 }
 
 export function reduceFrame(state: AutoState, fc: FrameCheck, at: number): FrameOutcome {
-  let s: AutoState = { ...state };
-
-  // The key that was just read stays hidden until it's been out of view for a few frames.
-  if (s.readKey) {
-    if (fc.detected && fc.key === s.readKey) s.readMisses = 0;
-    else if (++s.readMisses >= READ_RESET_MISSES) {
-      s.readKey = null;
-      s.readMisses = 0;
-    }
-  }
+  const s: AutoState = { ...state };
+  if (s.dismissed && at >= s.dismissed.until) s.dismissed = null;
 
   const d = toDetection(fc);
   let card: Detection | null = null;
   let appeared = false;
 
-  if (d && d.key !== s.readKey) {
+  if (d && !(s.dismissed && sameItem(d.key, s.dismissed.key))) {
     if (!s.shown) {
       s.shown = d; // first sighting: show at once
       appeared = true;
       s.candidate = null;
-    } else if (s.shown.key === d.key) {
-      s.shown = d; // same item: refresh the label quietly
-      s.candidate = null;
-    } else if (s.candidate === d.key) {
-      s.shown = d; // seen twice in a row: switch
+    } else if (sameItem(s.shown.key, d.key)) {
+      s.candidate = null; // same item, maybe reworded: keep the card (and its label) steady
+    } else if (s.candidate && sameItem(s.candidate, d.key)) {
+      s.shown = d; // a different item seen twice in a row: switch
       appeared = true;
       s.candidate = null;
     } else {
@@ -95,7 +103,17 @@ export function reduceFrame(state: AutoState, fc: FrameCheck, at: number): Frame
   return { state: s, card, appeared, ...(speakHint ? { speakHint } : {}) };
 }
 
-/** The user tapped the card (or Capture) and read this item. */
-export function markRead(state: AutoState, key: string): AutoState {
-  return { ...state, readKey: key, readMisses: 0, shown: null, candidate: null };
+/** A result sheet closed: start fresh so anything in view (even the same item) is offered again. */
+export function resumeAfterSheet(state: AutoState): AutoState {
+  return { ...state, shown: null, candidate: null, dismissed: null };
+}
+
+/** The × on the card: hide this item (and rewordings of it) for a few seconds. */
+export function dismissCard(state: AutoState, key: string, at: number): AutoState {
+  return { ...state, shown: null, candidate: null, dismissed: { key, until: at + DISMISS_MS } };
+}
+
+/** Sent with the next frame-check so the server keeps the same key for the same item. */
+export function lastSeen(state: AutoState): { lastKey?: string; lastLabel?: string } {
+  return state.shown ? { lastKey: state.shown.key, lastLabel: state.shown.label } : {};
 }

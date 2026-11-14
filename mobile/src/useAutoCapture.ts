@@ -1,6 +1,6 @@
 import { DeviceMotion } from "expo-sensors";
 import { useEffect, useRef } from "react";
-import { initialAutoState, markRead as markReadState, reduceFrame, type AutoState } from "./logic/autoCapture";
+import { dismissCard, initialAutoState, lastSeen, reduceFrame, resumeAfterSheet, type AutoState } from "./logic/autoCapture";
 import type { FrameCheck } from "./modes";
 
 export type { Detection } from "./logic/autoCapture";
@@ -41,7 +41,7 @@ export type Frame = { image: string } | { dark: true; luma: number } | null;
 type Options = {
   enabled: boolean;
   takeFrame: () => Promise<Frame>; // base64 JPEG ~512 px, or "too dark" (not sent)
-  check: (image: string) => Promise<{ status: number; data: FrameCheck | null }>;
+  check: (image: string, last: { lastKey?: string; lastLabel?: string }) => Promise<{ status: number; data: FrameCheck | null }>;
   onDetect: (d: Detection | null, appeared: boolean) => void; // null = nothing detected
   onHint: (hint: string) => void;
   onUnavailable: () => void;
@@ -136,7 +136,7 @@ export function useAutoCapture(opts: Options) {
           st.waitUntil = Date.now() + DARK_RETRY_MS;
           return;
         }
-        const { status, data } = await o.current.check(frame.image);
+        const { status, data } = await o.current.check(frame.image, lastSeen(logic.current));
         dbg.checks++;
         dbg.lastMs = Date.now() - t0;
         dbg.lastAt = Date.now();
@@ -200,9 +200,13 @@ export function useAutoCapture(opts: Options) {
   return {
     /** Resolves once no frame grab is using the camera, so a manual capture never collides. */
     idle: () => grabbing.current ?? Promise.resolve(),
-    /** The user tapped the card (or Capture) for this item: don't offer it again right away. */
-    markRead: (key: string) => {
-      logic.current = markReadState(logic.current, key);
+    /** A result sheet closed: offer whatever is in view again, even the same item. */
+    resume: () => {
+      logic.current = resumeAfterSheet(logic.current);
+    },
+    /** × on the card: hide this item for a few seconds. */
+    dismiss: (key: string) => {
+      logic.current = dismissCard(logic.current, key, Date.now());
     },
   };
 }
