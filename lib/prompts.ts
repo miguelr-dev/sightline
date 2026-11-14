@@ -43,7 +43,10 @@ If there is no single main subject, for example the camera is showing a room, a 
 - details: a longer description with notable objects, colors, and any text you can read.`,
 
   menu: () => `Mode: Menu / Label.
-Work out whether this is a menu, a product package, or a medicine or supplement label, then summarize it.
+First find the item the user is showing: the menu, package, bottle, or label that is held in a hand, closest to the camera, or centered and filling a good part of the frame. Summarize only that item. Ignore other menus, products, shelves, price tags, and signs around or behind it, even if they are readable. If several similar items are in view with none clearly in front, say how many there are, summarize the one in the center, and tell the user to hold up the one they want.
+If part of the item is cut off, covered by a finger, or turned away, say what is missing and how to fix it, for example "The prices are cut off on the right. Move the phone back a little" or "Turn the bottle to show the warnings on the back."
+
+Work out whether the item is a menu, a product package, or a medicine or supplement label, then summarize it.
 - Menu: say what kind of menu it is, its sections, and a few representative items with prices. Mention dietary markers (vegetarian, gluten free, spicy) if shown.
 - Product: name and brand, what it is, size or quantity, price if visible, key ingredients, allergens, and expiry or best-by date.
 - Medicine: name, strength, what it is for if printed, directions, and every warning exactly as printed.
