@@ -1,4 +1,5 @@
 import type { AnalyzeResponse, Mode } from "../modes";
+import type { StripMode } from "./modeStrip";
 
 // "Ask while looking" (tested in askWhileLooking.test.ts): hold the mic on the camera screen, say
 // "what does this sign say", and the app answers about a fresh frame. Pure pieces only.
@@ -6,8 +7,9 @@ import type { AnalyzeResponse, Mode } from "../modes";
 export type Interpreted = { mode: Mode; question?: string; language?: string };
 
 export type LookingRequest = {
+  conversation?: { question: string; answer: string }[];
   image: string;
-  mode: Mode;
+  mode: StripMode;
   language?: string;
   utterance?: string;
   question?: string;
@@ -18,7 +20,7 @@ const MAX_UTTERANCE = 300;
 /** The /api/analyze body. Older servers get the transcript as a plain follow-up `question`. */
 export function buildLookingRequest(o: {
   image: string;
-  mode: Mode;
+  mode: StripMode;
   language: string;
   utterance: string;
   supportsUtterance: boolean;

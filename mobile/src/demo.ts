@@ -58,13 +58,14 @@ const VOICES: Voice[] = [
 type Demo = {
   shot: Shot | null;
   sheet: "none" | "result" | "settings" | "language" | "recent";
-  mode: Mode;
+  mode: import("./logic/modeStrip").StripMode;
   photo: number;
   voices: Voice[] | null;
   hint: string | null;
   scans: Scan[] | null;
   detection: { key: string; label: string; mode: Mode | null; confidence: number | null } | null;
   hat: boolean;
+  book: import("./logic/book").BookState | null;
   hatAsking: string | null;
   caption: { phase: "asking"; text: string; status: string } | null;
   frozen: string | null;
@@ -119,13 +120,39 @@ export function demoState(): Demo | null {
           : q === "recent" || q === "recent-ask"
             ? "recent"
             : "none",
-    mode: q === "translate" ? "translate" : "menu",
+    mode: q === "translate" ? "translate" : "auto",
     photo,
     voices: VOICES,
     hint: null,
     detection:
       q === "home" || q === "hat" ? { key: "harbor-table-menu", label: "Harbor Table menu", mode: "menu", confidence: 0.92 } : null,
     hat: q === "hat",
+    book:
+      q === "book" || q === "book-turn"
+        ? {
+            status: q === "book" ? "reading" : "waitingTurn",
+            pageIndex: 0,
+            sentence: q === "book" ? 2 : 6,
+            prompted: q === "book-turn",
+            pages: [
+              {
+                text: "",
+                signature: "p1",
+                complete: true,
+                pageNumber: 37,
+                sentences: [
+                  "The house on the hill had been empty for years.",
+                  "Nobody in the village could say who had lived there last.",
+                  "But on the first cold night of autumn, a light came on in the attic window.",
+                  "Maya saw it from her bedroom and pressed her face to the glass.",
+                  "The light flickered twice, then held steady.",
+                  "She pulled on her boots, took her grandfather's torch, and slipped out the back door.",
+                  "The wind smelled of rain.",
+                ],
+              },
+            ],
+          }
+        : null,
     hatAsking: null,
     caption: q === "looking" ? { phase: "asking", text: "What does this sign say?", status: "Reading…" } : null,
     frozen: q === "looking" ? uri : null,

@@ -4,6 +4,8 @@ import type { AnalyzeResponse, AskAnswer, BarcodeResult, DeviceEvent, Features, 
 import { cleanSections, httpsUrl, MODES, UNKNOWN_FEATURES } from "./modes";
 import { parseHistoryScan, parseLookup } from "./logic/parse";
 import { withTimeout } from "./logic/timeout";
+import type { StripMode } from "./logic/modeStrip";
+import { parseBookPage } from "./logic/book";
 
 // Every call goes to the SightLine Next.js server. No API keys live in the app.
 
@@ -86,11 +88,13 @@ export async function getFeatures(): Promise<{ reachable: boolean; features: Fea
 
 export async function analyze(req: {
   image: string;
-  mode: Mode;
+  mode: StripMode; // "auto" lets the server pick
   language?: string;
   question?: string;
   utterance?: string; // "ask while looking": what the user said with this fresh photo
   key?: string; // frame-check key of the item, when reading from the detection card
+  conversation?: { question: string; answer: string }[]; // earlier turns about this result (max 6)
+  book?: boolean; // book mode: the reply carries `page`
 }): Promise<AnalyzeResponse> {
   const r = await postJson<AnalyzeResponse>("/api/analyze", req, 55_000);
   if (r.data && typeof r.data.spokenText === "string") {
@@ -103,8 +107,9 @@ export async function analyze(req: {
           ? r.data.interpreted
           : undefined,
       autoLookup: r.data.autoLookup === true,
+      page: parseBookPage((r.data as { page?: unknown }).page) ?? undefined,
     };
-    return r.ok ? data : { ...data, error: true };
+    return r.ok ? { ...data, httpStatus: r.status } : { ...data, error: true, httpStatus: r.status };
   }
   if (r.status === -1) {
     return { spokenText: "That took too long, so I stopped. Please try again.", details: "", error: true };

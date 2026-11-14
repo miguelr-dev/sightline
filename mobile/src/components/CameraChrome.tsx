@@ -1,8 +1,8 @@
 import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
-import type { ReactNode } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
-import { MODES, type Mode } from "../modes";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Pressable, ScrollView, type ScrollViewInstance, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { STRIP_LABELS, STRIP_MODES, type StripMode } from "../logic/modeStrip";
 import { MIN_TARGET } from "../theme";
 import { Icon } from "./ui";
 
@@ -11,8 +11,7 @@ import { Icon } from "./ui";
 
 export const CAM_YELLOW = "#FFD60A"; // iOS Camera's selected-mode yellow (paired with bold + dot)
 
-const SHORT: Record<Mode, string> = { read: "READ", describe: "DESCRIBE", menu: "MENU", translate: "TRANSLATE" };
-const SPOKEN: Record<Mode, string> = { read: "Read", describe: "Describe", menu: "Menu", translate: "Translate" };
+const SHORT: Record<StripMode, string> = { auto: "AUTO", read: "READ", describe: "DESCRIBE", menu: "MENU", translate: "TRANSLATE" };
 
 /** Frosted, rounded surface. Light blur with dark text; falls back to translucent white. */
 export function Frost({ children, style, dark }: { children: ReactNode; style?: StyleProp<ViewStyle>; dark?: boolean }) {
@@ -71,36 +70,58 @@ export function ModeStrip({
   language,
   onLanguage,
 }: {
-  mode: Mode;
-  onChange: (m: Mode) => void;
+  mode: StripMode;
+  onChange: (m: StripMode) => void;
   language: string;
   onLanguage: () => void;
 }) {
-  const i = MODES.indexOf(mode);
+  const i = STRIP_MODES.indexOf(mode);
+  // Like the iOS Camera, the selected mode slides to the centre of the strip.
+  const scroller = useRef<ScrollViewInstance>(null);
+  const [viewW, setViewW] = useState(0);
+  const items = useRef<Record<string, { x: number; w: number }>>({});
+  const center = (animated: boolean) => {
+    const it = items.current[mode];
+    if (!it || !viewW) return;
+    scroller.current?.scrollTo({ x: Math.max(0, it.x + it.w / 2 - viewW / 2), animated });
+  };
+  useEffect(() => center(true), [mode, viewW]);
   return (
     <View style={f.stripWrap}>
       <ScrollView
+        ref={scroller}
+        onLayout={(e) => setViewW(e.nativeEvent.layout.width)}
+        style={{ alignSelf: "stretch" }}
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={f.strip}
+        contentContainerStyle={[f.strip, { paddingHorizontal: viewW / 2 - 40 }]}
         accessible
         accessibilityRole="adjustable"
         accessibilityLabel="Mode"
-        accessibilityValue={{ text: `${SPOKEN[mode]}, ${i + 1} of ${MODES.length}` }}
+        accessibilityValue={{ text: `${STRIP_LABELS[mode]}, ${i + 1} of ${STRIP_MODES.length}` }}
         accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
         onAccessibilityAction={(e) => {
-          if (e.nativeEvent.actionName === "increment" && i < MODES.length - 1) onChange(MODES[i + 1]);
-          if (e.nativeEvent.actionName === "decrement" && i > 0) onChange(MODES[i - 1]);
+          if (e.nativeEvent.actionName === "increment" && i < STRIP_MODES.length - 1) onChange(STRIP_MODES[i + 1]);
+          if (e.nativeEvent.actionName === "decrement" && i > 0) onChange(STRIP_MODES[i - 1]);
         }}
       >
-        {MODES.map((m) => {
+        {STRIP_MODES.map((m) => {
           const sel = m === mode;
           return (
-            <Pressable key={m} onPress={() => onChange(m)} style={f.modeItem} hitSlop={4}>
+            <Pressable
+              key={m}
+              onPress={() => onChange(m)}
+              onLayout={(e) => {
+                items.current[m] = { x: e.nativeEvent.layout.x, w: e.nativeEvent.layout.width };
+                if (m === mode) center(false);
+              }}
+              style={f.modeItem}
+              hitSlop={4}
+            >
               <Text style={[f.modeText, sel && f.modeTextOn]} maxFontSizeMultiplier={1.5}>
                 {SHORT[m]}
               </Text>
-              <View style={[f.modeDot, sel && f.modeDotOn]} />
+              <View style={[f.modeBar, sel && f.modeBarOn]} />
             </Pressable>
           );
         })}
@@ -167,7 +188,7 @@ export function LastThumb({
       {uri ? (
         <Image source={{ uri }} style={f.thumbImg} contentFit="cover" accessible={false} />
       ) : (
-        <Icon sf="photo.on.rectangle" ion="images-outline" size={24} color="#FFFFFF" />
+        <Icon sf="photo.on.rectangle" ion="images-outline" size={28} color="#FFFFFF" />
       )}
     </Pressable>
   );
@@ -176,10 +197,10 @@ export function LastThumb({
 const f = StyleSheet.create({
   frost: { overflow: "hidden", borderRadius: 24 },
   camButton: {
-    minWidth: MIN_TARGET,
-    height: MIN_TARGET,
-    borderRadius: MIN_TARGET / 2,
-    paddingHorizontal: 12,
+    minWidth: 52,
+    height: 52,
+    borderRadius: 26,
+    paddingHorizontal: 14,
     backgroundColor: "rgba(0,0,0,0.45)",
     alignItems: "center",
     justifyContent: "center",
@@ -188,20 +209,20 @@ const f = StyleSheet.create({
   },
   camButtonOn: { backgroundColor: "#FFFFFF" },
   stripWrap: { alignItems: "center", gap: 6 },
-  strip: { paddingHorizontal: 16, gap: 18, alignItems: "center", justifyContent: "center", flexGrow: 1 },
-  modeItem: { minHeight: MIN_TARGET, justifyContent: "center", alignItems: "center", gap: 3 },
+  strip: { gap: 22, alignItems: "center" },
+  modeItem: { minHeight: 52, justifyContent: "center", alignItems: "center", gap: 5 },
   modeText: {
     color: "#FFFFFF",
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: "600",
-    letterSpacing: 1.2,
+    fontSize: 18,
+    lineHeight: 22,
+    fontWeight: "800",
+    letterSpacing: 1.4,
     textShadowColor: "rgba(0,0,0,0.6)",
     textShadowRadius: 3,
   },
-  modeTextOn: { color: CAM_YELLOW, fontWeight: "800" },
-  modeDot: { width: 5, height: 5, borderRadius: 2.5, backgroundColor: "transparent" },
-  modeDotOn: { backgroundColor: CAM_YELLOW },
+  modeTextOn: { color: CAM_YELLOW, fontWeight: "900" },
+  modeBar: { width: 28, height: 4, borderRadius: 2, backgroundColor: "transparent" },
+  modeBarOn: { backgroundColor: CAM_YELLOW },
   langPill: {
     minHeight: 36,
     paddingHorizontal: 14,
@@ -209,7 +230,7 @@ const f = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.55)",
     justifyContent: "center",
   },
-  langText: { color: "#FFFFFF", fontSize: 15, fontWeight: "600" },
+  langText: { color: "#FFFFFF", fontSize: 17, fontWeight: "700" },
   shutterRing: {
     width: 84,
     height: 84,
@@ -222,8 +243,8 @@ const f = StyleSheet.create({
   shutterCore: { width: 68, height: 68, borderRadius: 34, backgroundColor: "#FFFFFF" },
   shutterBusy: { backgroundColor: "rgba(255,255,255,0.5)" },
   thumbBox: {
-    width: 56,
-    height: 56,
+    width: 64,
+    height: 64,
     borderRadius: 12,
     overflow: "hidden",
     borderWidth: 2,

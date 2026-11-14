@@ -45,6 +45,7 @@ import {
   MODES,
   UNKNOWN_FEATURES,
   type DeviceEvent,
+  type AnalyzeResponse,
   type BarcodeResult,
   type Mode,
   type Scan,
@@ -60,6 +61,12 @@ import { useAutoCapture, type AutoDebug, type Detection } from "./src/useAutoCap
 import { useHatCamera } from "./src/useHatCamera";
 import { averageLuma, isTooDark } from "./src/logic/brightness";
 import { lookupLanguage } from "./src/logic/lookupRequest";
+import { conversationFrom, trimConversation, type Turn } from "./src/logic/conversation";
+import { initialBook, reduceBook, sentenceOwner, type BookEvent, type BookPage, type BookState } from "./src/logic/book";
+import { BookView } from "./src/components/BookView";
+import { useTurnDetector } from "./src/useTurnDetector";
+import { analyzeModeFor, autoRetry, frameCheckMode, headerLabel, STRIP_LABELS, STRIP_MODES, type StripMode } from "./src/logic/modeStrip";
+import { webSpeechPolicy, type WebTrigger } from "./src/logic/webSpeech";
 import { initialBarcodeState, normalizeBarcode, reduceBarcode, type BarcodeEvent } from "./src/logic/barcode";
 import {
   buildLookingRequest,
@@ -147,13 +154,18 @@ function Main() {
   const [askState, setAskState] = useState<AskState>(demo?.ask ?? { status: "idle" });
   const [askAvailable, setAskAvailable] = useState(true); // false after /api/ask 404s
   const askId = useRef(0);
-  const voiceTarget = useRef<"photo" | "history" | "main" | "hat">("photo");
+  const voiceTarget = useRef<"photo" | "history" | "main" | "hat" | "book">("photo");
   const [cmd, setCmd] = useState<CommandState>(initialCommandState);
   const cmdRef = useRef<CommandState>(initialCommandState);
   const cmdLocalId = useRef(0);
   const [shot, setShot] = useState<Shot | null>(demo?.shot ?? null);
   const [sheet, setSheetState] = useState<SheetName>(demo?.sheet ?? "none");
   const [busy, setBusy] = useState(false);
+  const [book, setBookState] = useState<BookState>(demo?.book ?? initialBook);
+  const bookRef = useRef<BookState>(book);
+  const bookPhotos = useRef<string[]>([]); // base64 of each page, for "Ask about this page"
+  const bookActive = book.status !== "idle";
+  const [speakingOwner, setSpeakingOwner] = useState<string | null>(null);
   const [speaking, setSpeaking] = useState(false);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
@@ -180,6 +192,7 @@ function Main() {
   // Bumped whenever a result is dismissed or replaced. Async work (answers, follow-ups, web
   // lookups) captures it when it starts and stays silent if it changed in the meantime.
   const speakToken = useRef(0);
+  const autoSupported = useRef(true); // server accepts mode "auto"; false after a 400
   const quietSince = useRef(Date.now());
   const speakingRef = useRef(false);
   const live = useRef({ settings, screenReader, connection });
@@ -192,9 +205,11 @@ function Main() {
   // ---- setup -------------------------------------------------------------------------------
   useEffect(() => {
     void speech.init();
-    const unsub = speech.subscribe((v) => {
+    const unsub = speech.subscribe((v, owner) => {
       speakingRef.current = v;
       setSpeaking(v);
+      setSpeakingOwner(v ? owner : null);
+      if (bookRef.current.status !== "idle") dispatchBook({ type: "speaking", owner: v ? owner : null });
       if (!v) quietSince.current = Date.now();
     });
     void AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion);
@@ -291,7 +306,7 @@ function Main() {
 
   // ---- web lookup -------------------------------------------------------------------------------
   const runLookup = useCallback(
-    async (s: Shot, auto: boolean) => {
+    async (s: Shot, auto: boolean, trigger: WebTrigger = auto ? "automatic" : "lookupButton") => {
       const r = s.result;
       if (!r || r.error) return;
       const token = speakToken.current;
@@ -324,6 +339,11 @@ function Main() {
       }
       patchShot(s.id, (x) => ({ ...x, web: { status: "done", data } }));
       if (token !== speakToken.current) return; // sheet closed meanwhile: show it, never speak it
+      // The web card is silent unless the user asked for the lookup; it has its own Listen button.
+      if (webSpeechPolicy(trigger) === "silent") {
+        if (!data.error) void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        return;
+      }
       if (!data.error) haptic.success();
       const webLang = lookupLanguage(s.mode, s.language) ? languageCode(s.language) : "en-US";
       say(data.spokenText, webLang, { queue: auto, token });
@@ -336,21 +356,36 @@ function Main() {
     async (s: Shot) => {
       if (!s.photo) return;
       const token = speakToken.current;
-      const r = await analyze({
-        image: s.photo.base64,
-        mode: s.mode,
-        ...(s.mode === "translate" ? { language: s.language } : {}),
-        ...(s.key ? { key: s.key } : {}),
-      });
+      const strip = s.strip ?? s.mode;
+      const ask = (mode: StripMode) =>
+        analyze({
+          image: s.photo!.base64,
+          mode,
+          ...(mode === "translate" ? { language: s.language } : {}),
+          ...(s.key ? { key: s.key } : {}),
+        });
+      let sent = analyzeModeFor(strip, { autoSupported: autoSupported.current, suggested: s.suggested });
+      let r = await ask(sent);
+      if (autoRetry({ sent, status: r.httpStatus ?? 0, error: !!r.error })) {
+        autoSupported.current = false; // older server: pick the mode on the phone from now on
+        sent = analyzeModeFor(strip, { autoSupported: false, suggested: s.suggested });
+        r = await ask(sent);
+      }
       if (shotRef.current?.id !== s.id) return;
-      const done: Shot = { ...s, result: r };
+      const mode = r.interpreted?.mode ?? (sent === "auto" ? s.mode : sent);
+      const done: Shot = {
+        ...s,
+        mode,
+        result: r,
+        ...(strip === "auto" ? { label: headerLabel("auto", r.interpreted ?? (sent !== "auto" ? { mode: sent } : undefined)) } : {}),
+      };
       setShot(done);
       shotRef.current = done;
       setBusyBoth(false);
       if (token !== speakToken.current) return; // dismissed while looking: keep the result, stay quiet
       if (r.error) haptic.error();
       else haptic.success();
-      say(r.spokenText, speakLang(s), { token });
+      say(r.spokenText, speakLang(done), { token });
       // Look the identified product, medicine or place up on the web once the answer is out.
       if (!r.error && r.webQuery && r.itemKind && r.itemKind !== "none") void runLookup(done, true);
     },
@@ -358,7 +393,10 @@ function Main() {
   );
 
   const start = useCallback(
-    async (getPhoto: () => Promise<Photo | null>, opts: { auto?: boolean; mode?: Mode; key?: string } = {}) => {
+    async (
+      getPhoto: () => Promise<Photo | null>,
+      opts: { auto?: boolean; mode?: Mode; key?: string; suggested?: Mode | null } = {},
+    ) => {
       if (busyRef.current) return;
       setBusyBoth(true);
       silence(); // a new read always cuts off the previous one
@@ -367,9 +405,20 @@ function Main() {
       else haptic.capture();
       const id = nextId.current++;
       const { settings: s } = live.current;
-      const mode = opts.mode ?? s.mode;
-      if (opts.mode && opts.mode !== s.mode) setSettings((x) => ({ ...x, mode }));
-      const fresh: Shot = { id, photo: null, mode, language: s.language, followUps: [], web: { status: "idle" }, key: opts.key };
+      const strip: StripMode = opts.mode ?? s.mode;
+      if (opts.mode && opts.mode !== s.mode) setSettings((x) => ({ ...x, mode: opts.mode! }));
+      const fresh: Shot = {
+        id,
+        photo: null,
+        mode: strip === "auto" ? (opts.suggested ?? "describe") : strip,
+        strip,
+        suggested: opts.suggested ?? null,
+        language: s.language,
+        followUps: [],
+        web: { status: "idle" },
+        key: opts.key,
+        createdAt: Date.now(),
+      };
       try {
         const photo = await getPhoto();
         if (!photo) {
@@ -395,6 +444,7 @@ function Main() {
   const autoEnabled =
     !demo &&
     !hat &&
+    !bookActive &&
     Platform.OS !== "web" &&
     settings.autoCapture &&
     appActive &&
@@ -420,7 +470,7 @@ function Main() {
       }),
     check: (image, last) => {
       const { settings: s } = live.current;
-      return frameCheck({ image, mode: s.mode, ...(s.mode === "translate" ? { language: s.language } : {}), ...last });
+      return frameCheck({ image, mode: frameCheckMode(s.mode), ...(s.mode === "translate" ? { language: s.language } : {}), ...last });
     },
     // Auto never reads by itself: it only offers the card. Reading starts when the user taps it.
     onDetect: (d, appeared) => showDetection(d, false, 2000, appeared),
@@ -466,7 +516,7 @@ function Main() {
     if (appeared === false || (appeared === undefined && prev && prev.key === d.key)) return;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     // Point the mode chips at the suggestion so a manual Capture uses it too.
-    if (d.mode && d.mode !== live.current.settings.mode && !live.current.settings.hatConnected) {
+    if (d.mode && live.current.settings.mode !== "auto" && d.mode !== live.current.settings.mode && !live.current.settings.hatConnected) {
       setSettings((x) => ({ ...x, mode: d.mode! }));
     }
     if (live.current.screenReader) AccessibilityInfo.announceForAccessibility(`${d.label} detected. Double-tap the card to read.`);
@@ -476,13 +526,14 @@ function Main() {
     const d = detectionRef.current;
     if (!d) return;
     showDetection(null, true);
-    void start(capturePhoto(true), { mode: d.mode ?? undefined, key: d.key });
+    const strip = live.current.settings.mode;
+    void start(capturePhoto(true), strip === "auto" ? { suggested: d.mode, key: d.key } : { mode: d.mode ?? undefined, key: d.key });
   };
 
   // ---- barcodes ------------------------------------------------------------------------------------
   // On-device scanning in every mode but Translate. A code seen twice within 500 ms is looked up
   // and offered as a card; nothing is spoken until the user taps it. Logic: logic/barcode.ts.
-  const barcodeOn = !hat && !demo && connection.features.barcode === true && settings.mode !== "translate" && sheet === "none";
+  const barcodeOn = !hat && !demo && !bookActive && connection.features.barcode === true && settings.mode !== "translate" && sheet === "none";
   const barcodeState = useRef(initialBarcodeState);
   const [barcodeCard, setBarcodeCardState] = useState<BarcodeResult | null>(demo?.barcode ?? null);
   const barcodeCardRef = useRef<BarcodeResult | null>(barcodeCard);
@@ -672,15 +723,21 @@ function Main() {
       if (scanId && cur.result?.scanId && cur.result.scanId !== scanId) return;
       patchShot(cur.id, (x) => ({ ...x, web: { status: "done", data: web } }));
       const tok = hatShotToken.current;
-      if (tok && tok.shotId === cur.id && tok.token === speakToken.current && !web.error) {
+      const policy = webSpeechPolicy(cur.webExplicit ? "hatLookupCommand" : "hatUpdate");
+      if (tok && tok.shotId === cur.id && tok.token === speakToken.current && !web.error && policy === "speak") {
         say(web.spokenText, "en-US", { queue: true, token: tok.token });
+      } else if (!web.error) {
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
       }
       return;
     }
     if (!answer) return;
     silence(); // a new answer replaces whatever was being said
     const token = speakToken.current;
-    const mode = MODES.includes(p.mode as Mode) ? (p.mode as Mode) : live.current.settings.mode;
+    const st0 = live.current.settings.mode;
+    const mode = MODES.includes(p.mode as Mode) ? (p.mode as Mode) : st0 === "auto" ? "describe" : st0;
+    const cmdType = (p.command as { type?: unknown } | undefined)?.type;
+    const webExplicit = cmdType === "lookup"; // "search for this": the user asked, so speak it
     const next: Shot = {
       id: nextId.current++,
       photo: image ? { uri: image, base64: "", width: 4, height: 3 } : null,
@@ -690,6 +747,7 @@ function Main() {
       followUps: [],
       web: web ? { status: "done", data: web } : { status: "idle" },
       fromHistory: true, // no photo data on the phone: no follow-ups or retry
+      webExplicit,
     };
     setShot(next);
     shotRef.current = next;
@@ -701,7 +759,9 @@ function Main() {
     if (answer.error) haptic.error();
     else haptic.success();
     say(answer.spokenText, mode === "translate" ? languageCode(next.language) : "en-US", { token });
-    if (web && !web.error) say(web.spokenText, "en-US", { queue: true, token });
+    if (web && !web.error && webSpeechPolicy(webExplicit ? "hatLookupCommand" : "hatUpdate") === "speak") {
+      say(web.spokenText, "en-US", { queue: true, token });
+    }
   };
 
   const hatCam = useHatCamera({
@@ -723,7 +783,7 @@ function Main() {
   };
 
   const pausedReasons = [
-    !settings.autoCapture && "Auto off",
+    !settings.autoCapture && "Detect off",
     !appActive && "app inactive",
     !cameraReady && "camera not ready",
     !camPerm?.granted && "no camera permission",
@@ -779,6 +839,13 @@ function Main() {
   };
 
   // ---- follow-up questions ----------------------------------------------------------------------
+  /** Up to 6 earlier question/answer turns about this result (carried-over thread first). */
+  const threadOf = (s: Shot): Turn[] =>
+    trimConversation([
+      ...(s.thread ?? []),
+      ...(s.asked && s.result && !s.result.error ? [{ question: s.asked, answer: s.result.spokenText }] : []),
+      ...conversationFrom(s.followUps),
+    ]);
   const ask = async (question: string) => {
     const s = shotRef.current;
     if (!s?.photo || !s.result || s.result.error) return;
@@ -792,6 +859,7 @@ function Main() {
       mode: s.mode,
       question,
       ...(s.mode === "translate" ? { language: s.language } : {}),
+      conversation: threadOf(s), // earlier turns about this result, so follow-ups make sense
     });
     if (shotRef.current?.id !== s.id) return;
     patchShot(s.id, (x) => ({
@@ -830,6 +898,7 @@ function Main() {
     if (token !== speakToken.current) return; // sheet closed while transcribing
     const target = voiceTarget.current;
     if (target === "hat") return void submitHatInput(text, "voice");
+    if (target === "book") return void askBook(text);
     if (target === "photo") return void ask(text);
     if (target === "history") return void runAsk(text);
     // Main screen: questions about earlier scans (or any question before there's a photo) go to
@@ -847,7 +916,7 @@ function Main() {
     void ask(text);
   };
 
-  const toggleMic = async (target: "photo" | "history" | "main" | "hat" = "photo") => {
+  const toggleMic = async (target: "photo" | "history" | "main" | "hat" | "book" = "photo") => {
     if (recording) return stopRecording();
     voiceTarget.current = target;
     if (target === "hat") silence(); // also keeps a late web summary from talking over the recording
@@ -967,6 +1036,84 @@ function Main() {
       },
     ]);
   };
+
+  // ---- book mode -------------------------------------------------------------------------------------
+  // The user starts a reading session; pages are read sentence by sentence and the next page is
+  // read when they turn it. Logic: logic/book.ts.
+  function dispatchBook(e: BookEvent) {
+    const r = reduceBook(bookRef.current, e);
+    bookRef.current = r.state;
+    setBookState(r.state);
+    for (const fx of r.effects) {
+      if (fx.type === "stopSpeech") silence();
+      else if (fx.type === "capture") void captureBookPage();
+      else if (fx.type === "haptic") void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      else if (fx.type === "speak") speech.speak(fx.text, "en-US", { owner: "book-prompt" });
+      else {
+        const page = r.state.pages[fx.pageIndex];
+        if (page) {
+          speech.speakAll(
+            page.sentences.slice(fx.sentence).map((t, k) => ({ owner: sentenceOwner(fx.pageIndex, fx.sentence + k), text: t })),
+            "en-US",
+          );
+        }
+      }
+    }
+  }
+
+  // Older servers without book mode: make a page from the plain read answer.
+  const pageFromAnswer = (r: AnalyzeResponse): BookPage | null => {
+    if (r.error) return null;
+    const text = (r.details || r.spokenText).trim();
+    let h = 0;
+    for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) | 0;
+    const sentences = (text.match(/[^.!?\n]+[.!?]*/g) ?? []).map((x) => x.trim()).filter(Boolean);
+    return sentences.length ? { text, sentences, signature: `h${h}`, complete: true } : null;
+  };
+
+  async function captureBookPage() {
+    try {
+      const photo = await withCamera(async () => {
+        const pic = await camera.current?.takePictureAsync({ quality: 0.8, shutterSound: false });
+        return pic ? toJpeg(pic.uri, pic.width, pic.height, 1600, 0.75) : null; // more pixels for small print
+      });
+      if (!photo || bookRef.current.status !== "capturing") return;
+      const r = await analyze({ image: photo.base64, mode: "read", book: true });
+      if (bookRef.current.status !== "capturing") return; // ended meanwhile
+      const page = r.page ?? pageFromAnswer(r);
+      if (!page) {
+        dispatchBook({ type: "page", page: { text: "", sentences: [], signature: "x", complete: false, cutOff: r.error ? r.spokenText : "I couldn't read that page. Please try again." } });
+        return;
+      }
+      const before = bookRef.current.pages.length;
+      dispatchBook({ type: "page", page });
+      if (bookRef.current.pages.length > before) bookPhotos.current[bookRef.current.pageIndex] = photo.base64;
+    } catch {
+      dispatchBook({ type: "page", page: { text: "", sentences: [], signature: "x", complete: false, cutOff: "I couldn't take that picture. Please try again." } });
+    }
+  }
+
+  async function askBook(text: string) {
+    if (/\bnext page\b/i.test(text)) return dispatchBook({ type: "nextPage" });
+    const b = bookRef.current;
+    const image = bookPhotos.current[b.pageIndex];
+    if (!image) return dispatchBook({ type: "answered" });
+    const r = await analyze({ image, mode: "read", question: text });
+    if (bookRef.current.status !== "asking") return;
+    dispatchBook({ type: "answered" }); // paused: "Resume" continues from the same sentence
+    speech.speak(r.spokenText, "en-US", { owner: "book-answer" });
+  }
+
+  const startBook = () => {
+    haptic.capture();
+    bookPhotos.current = [];
+    dispatchBook({ type: "start" });
+  };
+
+  useTurnDetector(book.status === "waitingTurn" && !demo, () => dispatchBook({ type: "turnDetected" }));
+  useEffect(() => {
+    if (!appActive && bookRef.current.status !== "idle") dispatchBook({ type: "pause" });
+  }, [appActive]);
 
   // ---- ask while looking ---------------------------------------------------------------------------
   // Hold the mic (or tap it) on the camera screen and ask about what's in front of you: on release
@@ -1089,15 +1236,28 @@ function Main() {
   async function answerLooking(photo: Photo, text: string) {
     const { settings: st } = live.current;
     const token = speakToken.current;
+    // Asking again within 2 minutes continues the same conversation.
+    const prev = shotRef.current;
+    const thread =
+      prev && prev.createdAt && Date.now() - prev.createdAt < 120_000 && (prev.asked || prev.followUps.length) ? threadOf(prev) : [];
     const ask = (supports: boolean) =>
-      analyze(buildLookingRequest({ image: photo.base64, mode: st.mode, language: st.language, utterance: text, supportsUtterance: supports }));
+      analyze({
+        ...buildLookingRequest({
+          image: photo.base64,
+          mode: analyzeModeFor(st.mode, { autoSupported: autoSupported.current }),
+          language: st.language,
+          utterance: text,
+          supportsUtterance: supports,
+        }),
+        ...(thread.length ? { conversation: thread } : {}),
+      });
     let r = await ask(supportsUtterance.current);
     if (supportsUtterance.current && fallbackFor(r) === "retry-as-question") {
       supportsUtterance.current = false; // older server: send the words as a question from now on
       r = await ask(false);
     }
     dispatchCaption({ type: "interpreted", interpreted: r.interpreted });
-    const mode = r.interpreted?.mode ?? st.mode;
+    const mode = r.interpreted?.mode ?? (st.mode === "auto" ? "describe" : st.mode);
     const language = r.interpreted?.language ?? st.language;
     const next: Shot = {
       id: nextId.current++,
@@ -1108,6 +1268,9 @@ function Main() {
       followUps: [],
       web: { status: "idle" },
       asked: text,
+      thread,
+      createdAt: Date.now(),
+      ...(st.mode === "auto" ? { label: headerLabel("auto", r.interpreted) } : {}),
     };
     setShot(next);
     shotRef.current = next;
@@ -1119,7 +1282,7 @@ function Main() {
     else haptic.success();
     say(r.spokenText, mode === "translate" ? languageCode(language) : "en-US", { token });
     const wantsLookup = !r.error && (r.autoLookup || (r.webQuery && r.itemKind && r.itemKind !== "none"));
-    if (wantsLookup) void runLookup(next, true);
+    if (wantsLookup) void runLookup(next, true, r.autoLookup ? "autoLookup" : "automatic");
   }
 
   const onMicPressIn = () => {
@@ -1142,11 +1305,11 @@ function Main() {
     setSheet("none");
   };
 
-  const changeMode = (m: Mode) => {
+  const changeMode = (m: StripMode) => {
     if (m === settings.mode) return;
     haptic.tick();
     update({ mode: m });
-    if (live.current.screenReader) AccessibilityInfo.announceForAccessibility(`${MODE_LABELS[m]} mode`);
+    if (live.current.screenReader) AccessibilityInfo.announceForAccessibility(`${STRIP_LABELS[m]} mode`);
   };
 
   // Swipe left/right on the viewfinder to change mode (iOS Camera); a plain tap captures.
@@ -1158,8 +1321,8 @@ function Main() {
       onPanResponderRelease: (_e, g) => {
         const { change, capture: snap, mode: cur } = swipe.current;
         if (Math.abs(g.dx) > 50 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5) {
-          const i = MODES.indexOf(cur) + (g.dx < 0 ? 1 : -1);
-          if (i >= 0 && i < MODES.length) change(MODES[i]);
+          const i = STRIP_MODES.indexOf(cur) + (g.dx < 0 ? 1 : -1);
+          if (i >= 0 && i < STRIP_MODES.length) change(STRIP_MODES[i]);
         } else if (Math.abs(g.dx) < 8 && Math.abs(g.dy) < 8) {
           snap();
         }
@@ -1171,7 +1334,7 @@ function Main() {
     haptic.tick();
     const next = !settings.autoCapture;
     update({ autoCapture: next, autoOffByServer: false });
-    if (live.current.screenReader) AccessibilityInfo.announceForAccessibility(next ? "Auto on" : "Auto off");
+    if (live.current.screenReader) AccessibilityInfo.announceForAccessibility(next ? "Detect on" : "Detect off");
   };
 
   // ---- render -----------------------------------------------------------------------------------
@@ -1242,7 +1405,7 @@ function Main() {
               accessible
               accessibilityRole="button"
               accessibilityLabel="Camera viewfinder"
-              accessibilityHint={`Double-tap to capture in ${MODE_LABELS[mode]} mode. Swipe left or right to change mode.`}
+              accessibilityHint={`Double-tap to capture in ${STRIP_LABELS[mode]} mode. Swipe left or right to change mode.`}
               onAccessibilityTap={capture}
             />
           ) : null}
@@ -1267,7 +1430,7 @@ function Main() {
           <View style={[s.camTop, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
             <CamButton
               role="switch"
-              label="Auto"
+              label="Detect"
               on={settings.autoCapture}
               hint="Offers a card when it sees something to read. Long-press for the debug readout."
               onPress={toggleAuto}
@@ -1277,23 +1440,23 @@ function Main() {
               }}
             >
               <Icon
-                sf={settings.autoCapture ? "sparkles" : "sparkles"}
-                ion="sparkles"
-                size={16}
+                sf="viewfinder"
+                ion="scan-outline"
+                size={20}
                 color={settings.autoCapture ? colors.label : "#FFFFFF"}
               />
               <Text style={[s.camTopText, settings.autoCapture && { color: colors.label }]} maxFontSizeMultiplier={1.4}>
-                {settings.autoCapture ? "AUTO" : "AUTO OFF"}
+                {settings.autoCapture ? "DETECT" : "DETECT OFF"}
               </Text>
             </CamButton>
             <View style={{ flexDirection: "row", gap: 10 }}>
               {historyOn || askOn ? (
                 <CamButton label="Recent scans" onPress={() => void openRecent()}>
-                  <Icon sf="clock.arrow.circlepath" ion="time-outline" size={20} color="#FFFFFF" />
+                  <Icon sf="clock.arrow.circlepath" ion="time-outline" size={24} color="#FFFFFF" />
                 </CamButton>
               ) : null}
               <CamButton label="Settings" onPress={() => setSheet("settings")}>
-                <Icon sf="gearshape" ion="settings-outline" size={20} color="#FFFFFF" />
+                <Icon sf="gearshape" ion="settings-outline" size={24} color="#FFFFFF" />
               </CamButton>
             </View>
           </View>
@@ -1378,6 +1541,20 @@ function Main() {
                 onDismiss={dismissDetection}
               />
             )}
+            {mode === "read" && !detection && !barcodeCard ? (
+              <Pressable
+                onPress={startBook}
+                accessibilityRole="button"
+                accessibilityLabel="Read a book"
+                accessibilityHint="Reads a book aloud page by page. Turn the page when asked."
+                style={{ alignSelf: "center" }}
+              >
+                <Frost style={s.bookPill}>
+                  <Icon sf="book.fill" ion="book" size={22} color={colors.label} />
+                  <Text style={[type.headline, { color: colors.label, fontWeight: "800" }]}>Read a book</Text>
+                </Frost>
+              </Pressable>
+            ) : null}
             <ModeStrip mode={mode} onChange={changeMode} language={settings.language} onLanguage={() => setSheet("language")} />
             <View style={s.camRow}>
               <LastThumb
@@ -1395,7 +1572,7 @@ function Main() {
                 onPress={capture}
                 busy={busy}
                 disabled={!camGranted}
-                label={busy ? "Looking" : `Capture, ${MODE_LABELS[mode]} mode`}
+                label={busy ? "Looking" : `Capture, ${STRIP_LABELS[mode]} mode`}
               />
               {connection.features.transcribe !== false && (Platform.OS !== "web" || demo) ? (
                 <Pressable
@@ -1408,14 +1585,37 @@ function Main() {
                   }
                   style={({ pressed }) => [s.camMic, micListening && s.camMicOn, pressed && { opacity: 0.8 }]}
                 >
-                  {micListening ? <View style={s.recDot} /> : <Icon sf="mic.fill" ion="mic" size={26} color="#FFFFFF" />}
+                  {micListening ? <View style={s.recDot} /> : <Icon sf="mic.fill" ion="mic" size={30} color="#FFFFFF" />}
                 </Pressable>
               ) : (
-                <View style={{ width: 56 }} />
+                <View style={{ width: 72 }} />
               )}
             </View>
           </View>
         </>
+      ) : null}
+
+      {bookActive && !hat ? (
+        <BookView
+          book={book}
+          speakingOwner={speakingOwner}
+          rate={settings.rate}
+          topInset={insets.top}
+          bottomInset={insets.bottom}
+          recording={recording && voiceTarget.current === "book"}
+          onPause={() => dispatchBook({ type: "pause" })}
+          onResume={() => dispatchBook({ type: "resume" })}
+          onBack={() => dispatchBook({ type: "back" })}
+          onNext={() => dispatchBook({ type: "nextPage" })}
+          onAsk={() => {
+            if (recording) return void toggleMic("book");
+            dispatchBook({ type: "ask" });
+            void toggleMic("book");
+          }}
+          onEnd={() => dispatchBook({ type: "end" })}
+          onRetake={() => dispatchBook({ type: "retake" })}
+          onRate={(rate) => update({ rate })}
+        />
       ) : null}
 
       {/* Hat mode keeps its own top bar */}
@@ -1439,10 +1639,10 @@ function Main() {
         </View>
       ) : null}
       {showDebug && !hat ? (
-        <View style={[s.debug, { top: insets.top + 60 }]} accessible accessibilityLabel="Auto capture debug readout">
+        <View style={[s.debug, { top: insets.top + 60 }]} accessible accessibilityLabel="Detect debug readout">
           <Text style={s.debugText}>
             {[
-              `auto: ${autoEnabled ? "running" : `paused (${pausedReasons.join(", ") || "?"})`}`,
+              `detect: ${autoEnabled ? "running" : `paused (${pausedReasons.join(", ") || "?"})`}`,
               `motion: ${debug?.motion ?? "-"}  steady: ${debug ? (debug.steady ? `yes ${debug.steadyMs}ms` : "no") : "-"}`,
               `rot ${debug?.rot.toFixed(1) ?? "-"} deg/s  acc ${debug?.acc.toFixed(2) ?? "-"} m/s2`,
               `checks: ${debug?.checks ?? 0}${debug?.inFlight ? " (in flight)" : ""}  dark skipped: ${debug?.darkSkipped ?? 0}  last: ${debug?.lastMs ?? 0}ms${
@@ -1644,13 +1844,13 @@ const s = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-  camTopText: { color: "#FFFFFF", fontSize: 13, fontWeight: "700", letterSpacing: 1 },
+  camTopText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800", letterSpacing: 1 },
   camBottom: { position: "absolute", left: 0, right: 0, bottom: 0, gap: 12, paddingHorizontal: 16 },
   camRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 12, marginTop: 4 },
   camMic: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     backgroundColor: "rgba(0,0,0,0.45)",
     borderWidth: 2,
     borderColor: "rgba(255,255,255,0.85)",
@@ -1658,6 +1858,7 @@ const s = StyleSheet.create({
     justifyContent: "center",
   },
   camMicOn: { backgroundColor: "#FFFFFF" },
+  bookPill: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 56, paddingHorizontal: 22, borderRadius: 28 },
   captionPill: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 48, paddingHorizontal: 18, borderRadius: 24 },
   statusPill: { minHeight: 36, paddingHorizontal: 14, borderRadius: 18, justifyContent: "center" },
   statusText: { color: "#FFFFFF", fontSize: 15, fontWeight: "600" },

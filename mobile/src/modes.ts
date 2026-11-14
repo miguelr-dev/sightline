@@ -43,7 +43,7 @@ export function languageCode(name: string): string {
 export type ItemKind = "none" | "food_drink" | "product" | "medicine" | "restaurant" | "book" | "place";
 
 // Item-dependent groups chosen by the server (Nutrition, Ingredients, Warnings, Full text, ...).
-export type Section = { title: string; body: string };
+export type Section = { title: string; body: string; provenance?: "label" | "web" };
 
 export type AnalyzeResponse = {
   spokenText: string;
@@ -54,6 +54,8 @@ export type AnalyzeResponse = {
   scanId?: string; // server-side history id; passed back to /api/lookup
   interpreted?: { mode: Mode; question?: string; language?: string }; // how an utterance was read
   autoLookup?: boolean; // "search for this": run /api/lookup right after
+  httpStatus?: number; // set by the client
+  page?: import("./logic/book").BookPage; // book mode
   error?: boolean;
 };
 
@@ -105,7 +107,11 @@ export function cleanSections(v: unknown): Section[] {
       (x): x is Section =>
         !!x && typeof x === "object" && typeof (x as Section).title === "string" && typeof (x as Section).body === "string",
     )
-    .map((x) => ({ title: x.title.trim(), body: x.body.trim() }))
+    .map((x) => ({
+      title: x.title.trim(),
+      body: x.body.trim(),
+      ...(x.provenance === "label" || x.provenance === "web" ? { provenance: x.provenance } : {}),
+    }))
     .filter((x) => x.title && x.body);
 }
 

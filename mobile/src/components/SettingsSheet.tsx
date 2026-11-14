@@ -121,11 +121,11 @@ export function SettingsSheet({
           <View style={s.group}>
             <Text style={[type.caption, s.groupLabel]}>Camera</Text>
             <View style={s.card}>
-              <Row label="Auto capture" hint="Hold the phone steady on something and SightLine reads it without a tap.">
+              <Row label="Detect" hint="Shows a card when the camera sees something to read. Nothing is read until you tap it.">
                 <Switch
                   value={settings.autoCapture}
                   onValueChange={(v) => onChange({ autoCapture: v, autoOffByServer: false })}
-                  accessibilityLabel="Auto capture"
+                  accessibilityLabel="Detect"
                   trackColor={{ true: colors.primary, false: colors.hairline }}
                   thumbColor={colors.bg}
                   ios_backgroundColor={colors.hairline}
