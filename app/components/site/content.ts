@@ -120,7 +120,7 @@ export const A11Y_FEATURES = [
   { title: "Big targets", body: "Every control is at least 44 points. The shutter is the biggest button on the screen and never moves." },
   { title: "Feel it", body: "A tap of haptic feedback when it starts looking, and another when the answer is ready, so you know without looking." },
   { title: "Your speed", body: "Speech from 0.75x to 1.5x, replay any time, and a Stop button that stops right away." },
-  { title: "Your text size", body: "Text scales with your phone's text size setting, and every animation respects Reduce Motion." },
+  { title: "Zoom in close", body: "Tap 1×, 2× or 5×, or pinch, to zoom the camera on small print. Tap your photo in an answer to magnify it up to 8×, in high contrast or inverted. Text follows your phone's text size, and every animation respects Reduce Motion." },
 ];
 
 export const FAQS = [

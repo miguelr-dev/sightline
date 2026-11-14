@@ -50,7 +50,7 @@ export function Hero() {
       <div className="stage">
         <PhoneMock
           className="reveal d4"
-          s={{ img: IMG.menuPortrait, mode: "auto", detect: { title: "Menú del día", sub: "Tap to read · Translate", delay: "1.4s" } }}
+          s={{ img: IMG.menuPortrait, mode: "auto", vfClass: "track", detect: { title: "Menú del día", sub: "Tap to read · Translate", delay: "1.4s" } }}
         />
         {/* The caption types itself for sighted visitors; screen readers get the whole line once. */}
         <p className="herocap" aria-hidden="true">

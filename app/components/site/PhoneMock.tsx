@@ -1,10 +1,11 @@
 // A vector recreation of SightLine's camera-first iPhone app (mobile/src/components/CameraChrome.tsx):
-// a frosted Detect pill, camera corners, a frosted detection card, the AUTO · READ · DESCRIBE ·
-// MENU · TRANSLATE strip, a round shutter, and the white answer sheet. Decorative: the
+// a frosted Detect pill, camera corners that turn into yellow Live Text-style brackets on a detected
+// item, a frosted detection card, the 1× · 2× · 5× zoom pill, the AUTO · READ · DESCRIBE · MENU ·
+// TRANSLATE strip, a round shutter, and the white answer sheet with its magnify badge. Decorative: the
 // surrounding page carries the real text.
 
 /* eslint-disable @next/next/no-img-element -- static mockup imagery */
-import { ArrowUp, Chevron, Clock, Gear, Mic, Viewfinder, Wave } from "./Icons";
+import { ArrowUp, Chevron, Clock, Gear, Magnify, Mic, Viewfinder, Wave } from "./Icons";
 
 export type StripMode = "auto" | "read" | "describe" | "menu" | "translate";
 const STRIP: { key: StripMode; label: string }[] = [
@@ -18,7 +19,8 @@ const STRIP: { key: StripMode; label: string }[] = [
 export type PhoneState = {
   img: string;
   camClass?: string;
-  vfClass?: string;
+  vfClass?: string; // "track": yellow brackets locked onto the menu board in IMG.menuPortrait
+  zoom?: 1 | 2 | 5; // the selected zoom chip; the camera image scales to match
   mode: StripMode;
   lang?: string; // shown as "→ English" in Translate
   detect?: { title: string; sub: string; pressed?: boolean; delay?: string } | null;
@@ -39,10 +41,10 @@ export function PhoneMock({ s, className = "" }: { s: PhoneState; className?: st
   return (
     <div className={`phone ios ${className}`} aria-hidden="true">
       <div className="notch" />
-      <img className={`cam ${s.camClass ?? ""}`} src={s.img} alt="" />
+      <img className={`cam ${s.camClass ?? ""}`} src={s.img} alt="" style={s.zoom && s.zoom > 1 ? { transform: `scale(${s.zoom})` } : undefined} />
       <div className="scrim-t" />
       <div className="scrim-b" />
-      <div className={`vf ${s.vfClass ?? ""}`}>
+      <div className={`vf ${s.vfClass ?? ""}`} style={s.vfClass?.includes("track") && s.detect?.delay ? { animationDelay: s.detect.delay } : undefined}>
         <i />
         <i />
         <i />
@@ -82,6 +84,14 @@ export function PhoneMock({ s, className = "" }: { s: PhoneState; className?: st
       )}
       {s.mode === "translate" && s.lang && <div className="ifloat ilang frost">→ {s.lang}</div>}
 
+      <div className="izoom">
+        {([1, 2, 5] as const).map((z) => (
+          <span key={z} className={(s.zoom ?? 1) === z ? "on" : ""}>
+            {z}×
+          </span>
+        ))}
+      </div>
+
       <div className="istrip">
         {STRIP.map((m) => (
           <span key={m.key} className={m.key === s.mode ? "sel" : ""}>
@@ -107,7 +117,12 @@ export function PhoneMock({ s, className = "" }: { s: PhoneState; className?: st
             {s.sheet.mode}
             <b>Done</b>
           </div>
-          <img className="ph2" src={s.sheet.img} alt="" />
+          <span className="iph">
+            <img className="ph2" src={s.sheet.img} alt="" />
+            <span className="imag">
+              <Magnify size={11} />
+            </span>
+          </span>
           <p className="ans">{s.sheet.text}</p>
           <div className="ibtns">
             <span className="k">
