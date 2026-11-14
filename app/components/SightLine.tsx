@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  MODES,
+  REQUEST_MODES,
   MODE_HINTS,
   MODE_LABELS,
   LANGUAGES,
@@ -12,6 +12,7 @@ import {
   type Features,
   type LookupResponse,
   type Mode,
+  type RequestMode,
   type Section,
 } from "@/lib/modes";
 import { captureVideoFrame, fileToBase64 } from "@/lib/image";
@@ -124,10 +125,13 @@ function Sections({ sections, fallback }: { sections?: Section[]; fallback?: str
   return fallback ? <p className="whitespace-pre-wrap text-[17px] leading-relaxed">{fallback}</p> : null;
 }
 
+const modeLabel = (m: RequestMode) => (m === "auto" ? "Auto" : MODE_LABELS[m]);
+const modeHint = (m: RequestMode) => (m === "auto" ? "SightLine picks the best mode for each photo." : MODE_HINTS[m]);
+
 export default function SightLine() {
   const [started, setStarted] = useState(false);
   const [camera, setCamera] = useState<CameraState>("off");
-  const [mode, setMode] = useState<Mode>("describe");
+  const [mode, setMode] = useState<RequestMode>("auto"); // Auto first, as in the iPhone app
   const [language, setLanguage] = useState("English");
   const [autoSpeak, setAutoSpeak] = useState(true);
   const [rate, setRateState] = useState(1);
@@ -339,7 +343,7 @@ export default function SightLine() {
 
   // ---------- Analyze ----------
   const analyze = useCallback(
-    async (image: string, opts: { mode: Mode; language: string; question?: string }) => {
+    async (image: string, opts: { mode: RequestMode; language: string; question?: string }) => {
       const now = Date.now();
       if (busyRef.current || now - lastSendRef.current < MIN_GAP_MS) return;
       busyRef.current = true;
@@ -386,7 +390,8 @@ export default function SightLine() {
       }
 
       const speakLang = data.error ? "en-US" : langCode;
-      const fresh: Result = { ...data, mode: opts.mode, langCode: speakLang, question: opts.question };
+      // In Auto the server reports the mode it chose.
+      const fresh: Result = { ...data, mode: data.mode ?? (opts.mode === "auto" ? "describe" : opts.mode), langCode: speakLang, question: opts.question };
       setResult(fresh);
       setStatus("");
       if (data.error) {
@@ -418,7 +423,7 @@ export default function SightLine() {
   );
 
   const capture = useCallback(
-    (override?: { mode?: Mode; language?: string }) => {
+    (override?: { mode?: RequestMode; language?: string }) => {
       unlockAll();
       if (busyRef.current) return;
       const m = override?.mode ?? latest.current.mode;
@@ -520,7 +525,7 @@ export default function SightLine() {
         sections,
         details: sections.map((x) => `${x.title}\n${x.body}`).join("\n\n"),
         error: data.error,
-        mode: latest.current.result?.mode ?? latest.current.mode,
+        mode: latest.current.result?.mode ?? (latest.current.mode === "auto" ? "describe" : latest.current.mode),
         langCode: speakLang,
         question: q,
       });
@@ -581,9 +586,9 @@ export default function SightLine() {
 
   // ---------- Voice ----------
   const chooseMode = useCallback(
-    (m: Mode, announce = true) => {
+    (m: RequestMode, announce = true) => {
       setMode(m);
-      if (announce) say(`${MODE_LABELS[m]} mode.`);
+      if (announce) say(`${modeLabel(m)} mode.`);
     },
     [say],
   );
@@ -846,8 +851,9 @@ export default function SightLine() {
 
         {/* Mode strip, like the iOS Camera app */}
         <nav aria-label="Mode" className="mt-2 shrink-0">
-          <div className="flex justify-center gap-1 overflow-x-auto px-4">
-            {MODES.map((m) => {
+          <div className="overflow-x-auto px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+           <div className="mx-auto flex w-max gap-0.5">
+            {REQUEST_MODES.map((m) => {
               const on = mode === m;
               return (
                 <button
@@ -856,18 +862,19 @@ export default function SightLine() {
                   aria-pressed={on}
                   aria-describedby={`hint-${m}`}
                   onClick={() => chooseMode(m)}
-                  className={`flex min-h-11 shrink-0 flex-col items-center justify-center gap-1 rounded-lg px-2.5 text-[14px] font-bold uppercase tracking-[0.08em] ${focusLight} ${
+                  className={`flex min-h-11 shrink-0 flex-col items-center justify-center gap-1 rounded-lg px-2 text-[13px] font-bold uppercase tracking-[0.05em] ${focusLight} ${
                     on ? "text-[#FFD60A]" : "text-white"
                   }`}
                 >
-                  {m === "menu" ? "Menu" : MODE_LABELS[m]}
+                  {m === "menu" ? "Menu" : modeLabel(m)}
                   <span aria-hidden="true" className={`h-[3px] w-5 rounded-full ${on ? "bg-[#FFD60A]" : "bg-transparent"}`} />
                   <span id={`hint-${m}`} className="sr-only">
-                    {MODE_LABELS[m]}. {MODE_HINTS[m]}
+                    {modeLabel(m)}. {modeHint(m)}
                   </span>
                 </button>
               );
             })}
+           </div>
           </div>
         </nav>
 
@@ -892,7 +899,7 @@ export default function SightLine() {
             type="button"
             onClick={() => capture()}
             aria-busy={busy}
-            aria-label={busy ? "Looking" : `Capture, ${MODE_LABELS[mode]} mode`}
+            aria-label={busy ? "Looking" : `Capture, ${modeLabel(mode)} mode`}
             className={`flex h-[78px] w-[78px] items-center justify-center justify-self-center rounded-full border-4 border-white ${focusLight}`}
           >
             <span className="flex h-[62px] w-[62px] items-center justify-center rounded-full bg-white transition-transform active:scale-90 motion-reduce:transition-none">

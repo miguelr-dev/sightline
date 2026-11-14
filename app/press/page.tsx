@@ -12,7 +12,7 @@ const FACTS: [string, string][] = [
   ["Launched", "SanD Hacks, Fall 2026"],
   ["Price", "Free during early access"],
   ["Platforms", "Any modern phone browser; iPhone app in testing"],
-  ["Modes", "Read, Describe, Menu / Label, Translate (13 languages)"],
+  ["Modes", "Auto, Read, Describe, Menu / Label, Translate (13 languages); barcodes and book mode in the iPhone app"],
   ["Built with", "Claude by Anthropic, ElevenLabs, Bright Data, Neon, Next.js, Expo"],
   ["Source", "github.com/miguelr-dev/sightline"],
 ];
