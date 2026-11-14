@@ -80,3 +80,38 @@ describe("POST /api/analyze with an utterance (ask while looking)", () => {
     expect(vi.mocked(analyzePhoto).mock.calls[0][0].isFollowUp).not.toBe(false);
   });
 });
+
+describe("POST /api/analyze in auto mode", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns the mode the model chose as interpreted.mode", async () => {
+    vi.mocked(analyzePhoto).mockResolvedValue({
+      body: { spokenText: "Harbor Table lunch menu.", details: "", itemKind: "restaurant" },
+      status: 200,
+      mode: "menu",
+    });
+    const body = await (await analyze({ mode: "auto" })).json();
+    expect(analyzePhoto).toHaveBeenCalledWith(expect.objectContaining({ mode: "auto" }));
+    expect(body.interpreted).toEqual({ mode: "menu" });
+  });
+
+  it('an utterance still overrides auto ("translate this to French")', async () => {
+    vi.mocked(analyzePhoto).mockResolvedValue({
+      body: { spokenText: "Attention : travaux.", details: "", itemKind: "none" },
+      status: 200,
+      mode: "translate",
+    });
+    const body = await (await analyze({ mode: "auto", utterance: "translate this to French" })).json();
+    expect(analyzePhoto).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "translate", language: "French" }),
+    );
+    expect(body.interpreted).toEqual({ mode: "translate", language: "French" });
+  });
+
+  it("still rejects an unknown mode", async () => {
+    const res = await analyze({ mode: "scan" });
+    expect(res.status).toBe(400);
+  });
+});

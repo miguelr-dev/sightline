@@ -1,5 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { ITEM_KINDS, type AnalyzeResponse, type ItemKind, type Mode } from "@/lib/modes";
+import {
+  ITEM_KINDS,
+  MODES,
+  type AnalyzeResponse,
+  type ItemKind,
+  type Mode,
+  type RequestMode,
+} from "@/lib/modes";
 import { after } from "next/server";
 import { randomUUID } from "node:crypto";
 import { PROMPT_VERSION, systemPrompt, userPrompt } from "@/lib/prompts";
@@ -35,6 +42,13 @@ const OUTPUT_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+// Auto mode: the model also says which mode it chose for this photo, in the same call.
+const AUTO_SCHEMA = {
+  ...OUTPUT_SCHEMA,
+  properties: { chosenMode: { type: "string", enum: [...MODES] }, ...OUTPUT_SCHEMA.properties },
+  required: ["chosenMode", ...OUTPUT_SCHEMA.required],
+} as const;
+
 // Search angle words, dropped when turning a web query into a short history title.
 const ANGLE_WORDS =
   /\b(nutrition|facts|caffeine|sugar|price|uses|recalls?|fda|warnings?|reviews?|menu|hours|allergens?|summary)\b/gi;
@@ -58,7 +72,7 @@ function slug(v: unknown): string | undefined {
 
 export type AnalyzeInput = {
   image: string; // base64 JPEG, no data: prefix
-  mode: Mode;
+  mode: RequestMode; // "auto": the model chooses the mode for this photo
   language: string; // a name from LANGUAGES
   question?: string;
   /** false: the question comes with a fresh photo ("ask while looking"), not a follow-up. */
@@ -70,7 +84,12 @@ export type AnalyzeInput = {
   persist?: "after" | "await" | "defer";
 };
 
-export type AnalyzeResult = { body: AnalyzeResponse; status: number; saved?: Promise<void> };
+export type AnalyzeResult = {
+  body: AnalyzeResponse;
+  status: number;
+  saved?: Promise<void>;
+  mode?: Mode; // the mode the answer was made in (what "auto" chose)
+};
 
 /** Cache the answer and save it to the device's history, then return it with its scan id. */
 async function finish(
@@ -112,12 +131,18 @@ async function finish(
     }
   };
   if (persist === "await") await save();
-  else if (persist === "defer") return { body, status: 200, saved: save() };
+  else if (persist === "defer") return { body, status: 200, saved: save(), mode: ctx.mode };
   else after(save);
-  return { body, status: 200 };
+  return { body, status: 200, mode: ctx.mode };
 }
 
-type Parsed = { spokenText?: unknown; sections?: unknown; webQuery?: unknown; itemKind?: unknown };
+type Parsed = {
+  chosenMode?: unknown;
+  spokenText?: unknown;
+  sections?: unknown;
+  webQuery?: unknown;
+  itemKind?: unknown;
+};
 
 function fail(spokenText: string, status: number): AnalyzeResult {
   return { body: { spokenText, details: "", error: true }, status };
@@ -159,7 +184,10 @@ export async function analyzePhoto(input: AnalyzeInput): Promise<AnalyzeResult> 
   const priorScan =
     ctx.device && dbConfigured() ? recentScanId(ctx.device, ctx.cacheKey) : undefined;
   const cached = await getCachedAnalysis(ctx.cacheKey);
-  if (cached) return finish(cached, { ...ctx, cached: true, priorScan }, persist);
+  if (cached) {
+    const was: Mode = mode === "auto" ? (cached.mode ?? "describe") : mode;
+    return finish(cached, { ...ctx, mode: was, cached: true, priorScan }, persist);
+  }
 
   const client = new Anthropic();
 
@@ -170,9 +198,12 @@ export async function analyzePhoto(input: AnalyzeInput): Promise<AnalyzeResult> 
       system: systemPrompt(mode, targetLanguage),
       content: [
         { type: "image", source: { type: "base64", media_type: imageMediaType(data), data } },
-        { type: "text", text: userPrompt(mode, targetLanguage, followUp, { isFollowUp: input.isFollowUp }) },
+        {
+          type: "text",
+          text: userPrompt(mode, targetLanguage, followUp, { isFollowUp: input.isFollowUp }),
+        },
       ],
-      schema: OUTPUT_SCHEMA,
+      schema: mode === "auto" ? AUTO_SCHEMA : OUTPUT_SCHEMA,
     });
 
     if (!parsed) {
@@ -192,9 +223,24 @@ export async function analyzePhoto(input: AnalyzeInput): Promise<AnalyzeResult> 
         ? parsed.webQuery.trim().slice(0, 200)
         : "";
 
+    // Auto: the mode the model chose, checked here; anything unexpected becomes describe.
+    const chosen: Mode =
+      mode !== "auto"
+        ? mode
+        : MODES.includes(parsed.chosenMode as Mode)
+          ? (parsed.chosenMode as Mode)
+          : "describe";
+
     return finish(
-      { spokenText, sections, details: sectionsToText(sections), webQuery, itemKind },
-      { ...ctx, cached: false },
+      {
+        spokenText,
+        sections,
+        details: sectionsToText(sections),
+        webQuery,
+        itemKind,
+        mode: chosen,
+      },
+      { ...ctx, mode: chosen, cached: false },
       persist,
     );
   } catch (error) {

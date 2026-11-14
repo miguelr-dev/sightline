@@ -1,9 +1,9 @@
-import type { Mode } from "./modes";
+import { MODES, type Mode, type RequestMode } from "./modes";
 
 // Server-only: mode-specific instructions for Claude.
 
 /** Bump when the prompts change, so cached answers from older prompts aren't reused. */
-export const PROMPT_VERSION = "2026-11-14.6";
+export const PROMPT_VERSION = "2026-11-14.7";
 
 const BASE = `You are SightLine, a visual assistant that reads the world out loud, for blind and low-vision people and for travelers who can't read the local language. The user pointed a phone camera at something. They can't see it, so your answer is their only view of it.
 
@@ -50,7 +50,8 @@ const MODE_INSTRUCTIONS: Record<Mode, (language: string) => string> = {
 - sections: the complete text, word for word, keeping line breaks: one "Full text" section, or one section per heading if the document has headings.
 If there is no readable text, say so and say in a few words what is there instead.`,
 
-  describe: () => `Mode: Describe. ${FOCUS} When there is a clear main item, name it first as specifically as you can (brand, product, size) with its key printed facts, and mention the background only if it's a hazard.
+  describe:
+    () => `Mode: Describe. ${FOCUS} When there is a clear main item, name it first as specifically as you can (brand, product, size) with its key printed facts, and mention the background only if it's a hazard.
 - spokenText: at most 25 words, most important first: anything in the user's path or a hazard, and where it is (clock directions, or "on your left / right / ahead"), then people and what they're doing, then the setting. If there's prominent text, such as a sign or a label, lead with what it says. If the photo is mainly one product held up to the camera, name it and its key printed facts instead of describing the hand.
 - sections: for example "Around you", "Text in view", "Details".`,
 
@@ -66,18 +67,37 @@ Read the visible text, work out its language, and translate it into ${language}.
 If there is no readable text, say only that, in one short sentence in ${language}. Every word of spokenText is in ${language}, even then.`,
 };
 
-export function systemPrompt(mode: Mode, language: string): string {
+/** Auto: the model picks the mode for this photo (chosenMode) and follows that mode's rules,
+ *  all in one call. The focus rule is given once, not once per mode. */
+function autoInstructions(language: string): string {
+  const withoutFocus = (s: string) => s.replace(` ${FOCUS}`, "").replace(FOCUS, "");
+  const modes = MODES.map(
+    (m) => `If chosenMode is "${m}":\n${withoutFocus(MODE_INSTRUCTIONS[m](language))}`,
+  ).join("\n\n");
+  return `Mode: Auto. ${FOCUS}
+Then choose the best mode for this photo, set chosenMode to it, and follow only that mode's instructions below:
+- packaged food, drink, product, medicine or menu: "menu"
+- foreign-language text (not in ${language}): "translate" (Translate into ${language})
+- documents, signs, screens or plain text in ${language}: "read"
+- scenes or no text: "describe"
+
+${modes}`;
+}
+
+export function systemPrompt(mode: RequestMode, language: string): string {
+  if (mode === "auto") return `${BASE}\n\n${autoInstructions(language)}`;
   return `${BASE}\n\n${MODE_INSTRUCTIONS[mode](language)}`;
 }
 
 export function userPrompt(
-  mode: Mode,
+  mode: RequestMode,
   language: string,
   question?: string,
   opts: { isFollowUp?: boolean } = {},
 ): string {
   if (question) {
-    const answerLanguage = mode === "translate" ? language : "the language the question is asked in";
+    const answerLanguage =
+      mode === "translate" ? language : "the language the question is asked in";
     // A follow-up is about the photo already answered; a fresh question comes with a new photo
     // ("ask while looking": the user points the camera and asks).
     const asked =

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
+import type { BarcodeResult } from "./barcode";
 import type { AnalyzeResponse, HistoryScan, LookupResponse, Mode, Section } from "./modes";
 
 // Server-only: Neon Postgres for caches and scan history, over Neon's HTTP driver.
@@ -53,6 +54,13 @@ export const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS scans_created_idx ON scans (created_at)`,
   `CREATE INDEX IF NOT EXISTS lookup_cache_created_idx ON lookup_cache (created_at)`,
   `CREATE INDEX IF NOT EXISTS analysis_cache_created_idx ON analysis_cache (created_at)`,
+  // Barcode answers by GTIN-14: products found are kept 7 days, misses 1 hour.
+  `CREATE TABLE IF NOT EXISTS barcode_cache (
+    key text PRIMARY KEY,
+    response jsonb NOT NULL,
+    found boolean NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
   // Hat camera: events the phone polls for, per-hat state, and hat-to-phone pairing.
   `CREATE TABLE IF NOT EXISTS device_events (
     id bigserial PRIMARY KEY,
@@ -218,6 +226,30 @@ export async function getCachedLookup(key: string): Promise<LookupResponse | und
     READ_TIMEOUT_MS,
   );
   return (rows?.[0]?.response as LookupResponse | undefined) ?? undefined;
+}
+
+/** A cached barcode answer: 7 days for a product that was found, 1 hour for a miss. */
+export async function getCachedBarcode(key: string): Promise<BarcodeResult | undefined> {
+  const rows = await withDb(
+    "barcode cache read",
+    (db) =>
+      db`SELECT response FROM barcode_cache
+         WHERE key = ${key}
+           AND created_at > now() - CASE WHEN found THEN interval '7 days' ELSE interval '1 hour' END`,
+    READ_TIMEOUT_MS,
+  );
+  return (rows?.[0]?.response as BarcodeResult | undefined) ?? undefined;
+}
+
+export async function putCachedBarcode(key: string, response: BarcodeResult) {
+  await withDb(
+    "barcode cache write",
+    (db) =>
+      db`INSERT INTO barcode_cache (key, response, found)
+         VALUES (${key}, ${JSON.stringify(response)}::jsonb, ${response.found})
+         ON CONFLICT (key) DO UPDATE SET response = EXCLUDED.response, found = EXCLUDED.found,
+           created_at = now()`,
+  );
 }
 
 export async function putCachedLookup(key: string, response: LookupResponse) {

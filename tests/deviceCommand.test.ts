@@ -224,6 +224,21 @@ describe("POST /api/device/command", () => {
       });
     });
 
+    it('an "auto" command lets the server choose the mode', async () => {
+      putFrame(HAT, FRAME);
+      analyzeReturns({ spokenText: "Red Bull Energy Drink.", itemKind: "food_drink", webQuery: "" });
+      vi.mocked(analyzePhoto).mockResolvedValueOnce({
+        body: { spokenText: "Red Bull Energy Drink.", details: "", sections: [], itemKind: "none" },
+        status: 200,
+        saved: Promise.resolve(),
+        mode: "menu",
+      });
+      await POST(command({ command: { type: "auto" } }));
+      await drain();
+      expect(analyzePhoto).toHaveBeenCalledWith(expect.objectContaining({ mode: "auto" }));
+      expect(eventsOfKind("answer")[0]).toMatchObject({ command: { type: "auto" }, mode: "menu" });
+    });
+
     it("plain text that isn't a command becomes a question", async () => {
       putFrame(HAT, FRAME);
       await POST(command({ text: "Is there anything vegetarian?" }));

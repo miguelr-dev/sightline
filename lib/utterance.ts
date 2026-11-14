@@ -1,4 +1,4 @@
-import { findLanguage, type Mode } from "./modes";
+import { findLanguage, type RequestMode } from "./modes";
 import { parseCommand } from "./voice";
 
 // "Ask while looking": the user holds up the phone and says "what does this sign say",
@@ -9,7 +9,7 @@ export const MAX_UTTERANCE = 300;
 
 export type Interpretation = {
   utterance: string; // trimmed, at most MAX_UTTERANCE characters
-  mode: Mode;
+  mode: RequestMode; // "auto" stays auto unless the utterance names a mode
   language: string;
   question?: string; // a question about this new photo
   autoLookup: boolean; // "search for this": the app should run /api/lookup after the answer
@@ -22,7 +22,7 @@ export type Interpretation = {
  */
 export function interpretUtterance(
   raw: unknown,
-  base: { mode: Mode; language: string },
+  base: { mode: RequestMode; language: string },
 ): Interpretation | null {
   if (typeof raw !== "string") return null;
   const utterance = raw.trim().slice(0, MAX_UTTERANCE);

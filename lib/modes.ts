@@ -3,6 +3,14 @@
 export const MODES = ["read", "describe", "menu", "translate"] as const;
 export type Mode = (typeof MODES)[number];
 
+/** What a request may ask for: a mode, or "auto" to let the server choose per photo. */
+export const REQUEST_MODES = ["auto", ...MODES] as const;
+export type RequestMode = (typeof REQUEST_MODES)[number];
+
+export function isRequestMode(v: unknown): v is RequestMode {
+  return typeof v === "string" && (REQUEST_MODES as readonly string[]).includes(v);
+}
+
 export const MODE_LABELS: Record<Mode, string> = {
   read: "Read",
   describe: "Describe",
@@ -72,6 +80,7 @@ export type AnalyzeResponse = {
   details: string; // flat fallback: the sections joined as plain text
   webQuery?: string; // short search query for a web lookup, empty when nothing is identifiable
   itemKind?: ItemKind;
+  mode?: Mode; // the mode the answer was made in (what "auto" chose)
   scanId?: string; // history entry for this scan (only with an x-sightline-device header)
   cached?: boolean; // true when this exact photo and request were answered before
   utterance?: string; // the request's utterance, echoed back (trimmed, max 300 chars)
@@ -135,7 +144,14 @@ export type AskResponse = {
 };
 
 /** A spoken command for the hat camera, sent by the paired phone to /api/device/command. */
-export type HatCommandType = "read" | "describe" | "menu" | "translate" | "question" | "lookup";
+export type HatCommandType =
+  | "auto"
+  | "read"
+  | "describe"
+  | "menu"
+  | "translate"
+  | "question"
+  | "lookup";
 export type HatCommand = { type: HatCommandType; question?: string; language?: string };
 
 export type DeviceCommandRequest = {
@@ -148,6 +164,21 @@ export type DeviceCommandRequest = {
 export type DeviceCommandResponse =
   | { accepted: true; commandId: string }
   | { accepted: false; reason: "no-frame" | "unpaired" | "bad-command" };
+
+/** GET /api/barcode?code=<digits>&language=<name> */
+export type BarcodeResponse = {
+  code: string;
+  found: boolean;
+  source?: "openfoodfacts" | "web" | "openfda"; // absent when nothing was found
+  spokenText: string;
+  sections: Section[];
+  itemKind: ItemKind;
+  image?: string;
+  title?: string;
+  scanId?: string; // with an x-sightline-device header
+  cached?: boolean;
+  error?: string; // "bad-code" with HTTP 400
+};
 
 export type FrameCheckRequest = {
   image: string; // base64 JPEG, about 512 px, no data: prefix
@@ -178,4 +209,5 @@ export type Features = {
   ask: boolean; // "Ask your history" agent is available (/api/ask)
   hat: boolean; // hat camera routes are set up (DEVICE_SHARED_KEY and DATABASE_URL)
   hatCommands: boolean; // the hat camera takes voice commands (/api/device/command)
+  barcode: boolean; // barcode lookup (/api/barcode)
 };

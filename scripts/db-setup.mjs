@@ -43,6 +43,13 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS scans_created_idx ON scans (created_at)`,
   `CREATE INDEX IF NOT EXISTS lookup_cache_created_idx ON lookup_cache (created_at)`,
   `CREATE INDEX IF NOT EXISTS analysis_cache_created_idx ON analysis_cache (created_at)`,
+  // Barcode answers by GTIN-14: products found are kept 7 days, misses 1 hour.
+  `CREATE TABLE IF NOT EXISTS barcode_cache (
+    key text PRIMARY KEY,
+    response jsonb NOT NULL,
+    found boolean NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
   // Hat camera: events the phone polls for, per-hat state, and hat-to-phone pairing.
   `CREATE TABLE IF NOT EXISTS device_events (
     id bigserial PRIMARY KEY,
@@ -81,6 +88,6 @@ if (!process.env.DATABASE_URL) {
 const sql = neon(process.env.DATABASE_URL);
 for (const statement of SCHEMA) await sql.query(statement);
 const tables = await sql`SELECT table_name FROM information_schema.tables
-  WHERE table_schema = 'public' AND table_name IN ('lookup_cache', 'analysis_cache', 'scans', 'device_events', 'device_state', 'device_pairs')
+  WHERE table_schema = 'public' AND table_name IN ('lookup_cache', 'analysis_cache', 'scans', 'device_events', 'device_state', 'device_pairs', 'barcode_cache')
   ORDER BY table_name`;
 console.log("Ready:", tables.map((t) => t.table_name).join(", "));

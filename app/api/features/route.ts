@@ -16,6 +16,7 @@ export async function GET() {
     ask: dbConfigured() && Boolean(process.env.ANTHROPIC_API_KEY),
     hat: dbConfigured() && Boolean(process.env.DEVICE_SHARED_KEY),
     hatCommands: true, // /api/device/command exists; it answers 503 itself when the hat isn't set up
+    barcode: true, // Open Food Facts and openFDA need no keys; the web fallback needs Bright Data
   };
   return Response.json(body, { headers: { "Cache-Control": "no-store" } });
 }
