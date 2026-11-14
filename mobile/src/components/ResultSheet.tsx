@@ -1,5 +1,7 @@
 import { Image } from "expo-image";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { initialReadAll, reduceReadAll, type ReadAllEvent, type ReadAllState } from "../logic/readAll";
+import { speech } from "../speech";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -63,6 +65,27 @@ export function ResultSheet(p: Props) {
   const askBusy = !!shot?.followUps.some((f) => !f.answer);
   const lang = shot?.mode === "translate" ? languageCode(shot.language) : "en-US";
 
+  // Read all: every section (answer, then web) in order, one owner per section.
+  const [readAll, setReadAllState] = useState<ReadAllState>(initialReadAll);
+  const readAllRef = useRef<ReadAllState>(initialReadAll);
+  const setReadAll = (st: ReadAllState) => {
+    readAllRef.current = st;
+    setReadAllState(st);
+  };
+  const dispatchReadAll = (e: ReadAllEvent) => {
+    const r = reduceReadAll(readAllRef.current, e);
+    setReadAll(r.state); // before the effects: stopping speech reports back synchronously
+    for (const fx of r.effects) {
+      if (fx.type === "stopSpeech") speech.stop();
+      else speech.speakAll(fx.items, lang);
+    }
+  };
+  useEffect(
+    () => speech.subscribe((on, owner) => setReadAll(reduceReadAll(readAllRef.current, { type: "speaking", owner: on ? owner : null }).state)),
+    [],
+  );
+  useEffect(() => setReadAll(initialReadAll), [shot?.id, p.visible]); // new result or sheet closed
+
   const send = () => {
     const q = question.trim();
     if (!q || askBusy) return;
@@ -83,7 +106,7 @@ export function ResultSheet(p: Props) {
       <View style={s.root}>
         <View style={s.header}>
           <Text style={type.caption} accessibilityRole="header">
-            {shot ? (shot.mode === "translate" ? `Translate to ${shot.language}` : MODE_LABELS[shot.mode]) : ""}
+            {shot ? shot.label ?? (shot.mode === "translate" ? `Translate to ${shot.language}` : MODE_LABELS[shot.mode]) : ""}
           </Text>
           <Pressable
             onPress={p.onClose}
@@ -181,6 +204,32 @@ export function ResultSheet(p: Props) {
                   />
                 </View>
 
+                {(() => {
+                  const answerSecs = sectionsOf(r);
+                  const webSecs = shot!.web.status === "done" ? shot!.web.data.sections ?? [] : [];
+                  if (answerSecs.length + webSecs.length < 2) return null;
+                  const reading = readAll.status === "reading";
+                  return (
+                    <PillButton
+                      label={reading ? "Stop reading" : "Read all"}
+                      variant="secondary"
+                      onPress={() =>
+                        dispatchReadAll(
+                          reading
+                            ? { type: "stop" }
+                            : {
+                                type: "start",
+                                prefix: `r-${shot!.id}`,
+                                sections: answerSecs,
+                                more: webSecs.length ? [{ prefix: `w-${shot!.id}`, sections: webSecs }] : [],
+                              },
+                        )
+                      }
+                      accessibilityHint={reading ? "Stops reading the sections" : "Reads every section aloud, in order"}
+                      icon={<Icon sf={reading ? "stop.fill" : "text.line.first.and.arrowtriangle.forward"} ion={reading ? "stop" : "list"} size={17} />}
+                    />
+                  );
+                })()}
                 <SectionList key={`r-${shot!.id}`} idPrefix={`r-${shot!.id}`} lang={lang} sections={sectionsOf(r)} reduceMotion={p.reduceMotion} />
 
                 {shot!.followUps.map((f) => (

@@ -82,6 +82,14 @@ function Disclosure({
   // Until the text is measured, guess from length so the button doesn't pop in late.
   const [long, setLong] = useState(() => section.body.length > 320 || section.body.split("\n").length > PREVIEW_LINES);
 
+  // Read all: a section opens by itself while it's being read (More/Less stays as it was).
+  useEffect(() => {
+    if (speaking && !open) {
+      animate(reduceMotion);
+      setOpen(true);
+    }
+  }, [speaking]);
+
   const toggle = () => {
     animate(reduceMotion);
     if (open) {

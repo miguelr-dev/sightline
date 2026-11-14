@@ -26,6 +26,7 @@ import {
   lookup,
   parseDeviceAnswer,
   sendHatCommand,
+  lookupBarcode,
   unpairHat,
   setBaseUrl,
   setDeviceId,
@@ -44,6 +45,7 @@ import {
   MODES,
   UNKNOWN_FEATURES,
   type DeviceEvent,
+  type BarcodeResult,
   type Mode,
   type Scan,
   type Voice,
@@ -58,6 +60,7 @@ import { useAutoCapture, type AutoDebug, type Detection } from "./src/useAutoCap
 import { useHatCamera } from "./src/useHatCamera";
 import { averageLuma, isTooDark } from "./src/logic/brightness";
 import { lookupLanguage } from "./src/logic/lookupRequest";
+import { initialBarcodeState, normalizeBarcode, reduceBarcode, type BarcodeEvent } from "./src/logic/barcode";
 import {
   buildLookingRequest,
   fallbackFor,
@@ -410,6 +413,7 @@ function Main() {
       withCamera(async () => {
         if (!cameraStartedAt.current || Date.now() - cameraStartedAt.current < CAMERA_SETTLE_MS) return null;
         if (busyRef.current || sheetRef.current !== "none") return null;
+        if (barcodeCardRef.current || barcodeState.current.pending) return null; // a barcode has priority
         const pic = await camera.current?.takePictureAsync({ quality: 0.7, shutterSound: false });
         if (!pic) return null;
         return toFrame(pic.uri, pic.width, pic.height);
@@ -475,6 +479,83 @@ function Main() {
     void start(capturePhoto(true), { mode: d.mode ?? undefined, key: d.key });
   };
 
+  // ---- barcodes ------------------------------------------------------------------------------------
+  // On-device scanning in every mode but Translate. A code seen twice within 500 ms is looked up
+  // and offered as a card; nothing is spoken until the user taps it. Logic: logic/barcode.ts.
+  const barcodeOn = !hat && !demo && connection.features.barcode === true && settings.mode !== "translate" && sheet === "none";
+  const barcodeState = useRef(initialBarcodeState);
+  const [barcodeCard, setBarcodeCardState] = useState<BarcodeResult | null>(demo?.barcode ?? null);
+  const barcodeCardRef = useRef<BarcodeResult | null>(barcodeCard);
+  const setBarcodeCard = (b: BarcodeResult | null) => {
+    barcodeCardRef.current = b;
+    setBarcodeCardState(b);
+  };
+
+  function dispatchBarcode(e: BarcodeEvent) {
+    const r = reduceBarcode(barcodeState.current, e);
+    barcodeState.current = r.state;
+    for (const fx of r.effects) {
+      if (fx.type === "aimTick") haptic.tick();
+      else if (fx.type === "gone") setBarcodeCard(null);
+      else void confirmBarcode(fx.code);
+    }
+  }
+
+  async function confirmBarcode(code: string) {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    const res = await lookupBarcode(code);
+    if (!res || barcodeState.current.confirmed !== code) return; // failed, or it left the frame
+    setBarcodeCard(res);
+    showDetection(null, true); // the barcode card takes priority
+    if (live.current.screenReader) {
+      AccessibilityInfo.announceForAccessibility(`${res.title ?? "Product"} barcode. Double-tap the card to read.`);
+    }
+  }
+
+  const onBarcode = (r: { type: string; data: string }) => {
+    const code = normalizeBarcode(r.type, r.data);
+    dispatchBarcode(code ? { type: "seen", code, at: Date.now() } : { type: "partial", at: Date.now() });
+  };
+
+  useEffect(() => {
+    if (!barcodeOn) return;
+    const t = setInterval(() => dispatchBarcode({ type: "tick", at: Date.now() }), 500);
+    return () => clearInterval(t);
+  }, [barcodeOn]);
+
+  const readBarcode = () => {
+    const b = barcodeCardRef.current;
+    if (!b) return;
+    dispatchBarcode({ type: "read", code: b.code, at: Date.now() });
+    setBarcodeCard(null);
+    silence();
+    const token = speakToken.current;
+    const next: Shot = {
+      id: nextId.current++,
+      photo: b.image ? { uri: b.image, base64: "", width: 1, height: 1 } : null,
+      mode: "menu",
+      language: live.current.settings.language,
+      result: { spokenText: b.spokenText, details: "", sections: b.sections, itemKind: b.itemKind, scanId: b.scanId, error: !b.found },
+      followUps: [],
+      web: { status: "idle" },
+      fromHistory: true, // no photo data: no follow-ups or retry
+      label: "Barcode",
+    };
+    setShot(next);
+    shotRef.current = next;
+    setSheet("result");
+    haptic.success();
+    say(b.spokenText, "en-US", { token });
+  };
+
+  const dismissBarcode = () => {
+    const b = barcodeCardRef.current;
+    if (!b) return;
+    haptic.tick();
+    dispatchBarcode({ type: "read", code: b.code, at: Date.now() }); // hide it for a while
+    setBarcodeCard(null);
+  };
+
   const dismissDetection = () => {
     const d = detectionRef.current;
     if (!d) return;
@@ -485,7 +566,10 @@ function Main() {
 
   // Whenever a sheet closes, Auto resumes at once and may offer the same item again (rescan).
   useEffect(() => {
-    if (sheet === "none") auto.resume();
+    if (sheet === "none") {
+      auto.resume();
+      dispatchBarcode({ type: "sheetClosed" });
+    }
   }, [sheet]);
 
   // ---- hat camera ---------------------------------------------------------------------------------
@@ -1134,6 +1218,8 @@ function Main() {
               animateShutter={false}
               flash="off"
               onCameraReady={onCameraReady}
+              barcodeScannerSettings={{ barcodeTypes: ["ean13", "ean8", "upc_a", "upc_e"] }}
+              onBarcodeScanned={barcodeOn ? onBarcode : undefined}
             />
           ) : (
             <View style={[StyleSheet.absoluteFill, s.permission, { paddingTop: insets.top + 96 }]}>
@@ -1272,12 +1358,26 @@ function Main() {
 
           {/* Bottom: detection pill, mode strip, then thumbnail · shutter · mic */}
           <View style={[s.camBottom, { paddingBottom: insets.bottom + 14 }]} pointerEvents="box-none">
-            <DetectionCard
-              detection={sheet === "none" ? detection : null}
-              reduceMotion={reduceMotion}
-              onPress={readDetection}
-              onDismiss={dismissDetection}
-            />
+            {barcodeCard ? (
+              <DetectionCard
+                detection={
+                  sheet === "none"
+                    ? { key: barcodeCard.code, label: barcodeCard.title ?? (barcodeCard.found ? "Product" : "Unknown product"), mode: null, confidence: null }
+                    : null
+                }
+                kindLabel="Barcode"
+                reduceMotion={reduceMotion}
+                onPress={readBarcode}
+                onDismiss={dismissBarcode}
+              />
+            ) : (
+              <DetectionCard
+                detection={sheet === "none" ? detection : null}
+                reduceMotion={reduceMotion}
+                onPress={readDetection}
+                onDismiss={dismissDetection}
+              />
+            )}
             <ModeStrip mode={mode} onChange={changeMode} language={settings.language} onLanguage={() => setSheet("language")} />
             <View style={s.camRow}>
               <LastThumb

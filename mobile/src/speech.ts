@@ -43,7 +43,7 @@ function chunk(text: string, max: number, firstMax = max): string[] {
 // voice (hints); "preview" plays a voice sample. Everything goes through one queue, so nothing
 // overlaps and nothing queued is lost.
 type Item =
-  | { kind: "speech"; text: string; lang: string }
+  | { kind: "speech"; text: string; lang: string; owner?: string | null }
   | { kind: "device"; text: string; lang: string }
   | { kind: "preview"; voiceId: string; previewUrl?: string };
 
@@ -106,11 +106,15 @@ class SpeechEngine {
   speak(text: string, lang = "en-US", opts: { queue?: boolean; owner?: string } = {}) {
     const t = text.trim();
     if (!t) return;
-    if (!opts.queue) {
-      this.stop();
-      this.owner = opts.owner ?? null;
-    }
-    this.queue.push({ kind: "speech", text: t, lang });
+    if (!opts.queue) this.stop();
+    this.queue.push({ kind: "speech", text: t, lang, owner: opts.owner ?? null });
+    if (!this.draining) void this.drain();
+  }
+
+  /** Read several pieces in order, each with its own owner (Read all). Stops what's playing. */
+  speakAll(items: { owner: string; text: string }[], lang = "en-US") {
+    this.stop();
+    for (const it of items) if (it.text.trim()) this.queue.push({ kind: "speech", text: it.text.trim(), lang, owner: it.owner });
     if (!this.draining) void this.drain();
   }
 
@@ -184,6 +188,12 @@ class SpeechEngine {
     this.emit(true);
     while (this.queue.length && run === this.run) {
       const item = this.queue.shift()!;
+      // Each item names its owner (e.g. a section being read) so the UI can mark it.
+      const owner = item.kind === "speech" ? (item.owner ?? null) : null;
+      if (owner !== this.owner) {
+        this.owner = owner;
+        this.emit(true);
+      }
       if (item.kind === "preview") await this.playPreview(run, item.voiceId, item.previewUrl);
       else if (item.kind === "speech" && this.useNatural()) await this.sayNatural(run, item);
       else await this.sayDevice(run, item.text, item.lang);

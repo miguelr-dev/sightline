@@ -13,11 +13,13 @@ export function DetectionCard({
   reduceMotion,
   onPress,
   onDismiss,
+  kindLabel,
 }: {
   detection: Detection | null;
   reduceMotion: boolean;
   onPress?: () => void; // without it the card is informational (hat camera mode)
   onDismiss?: () => void; // × on the camera-screen pill
+  kindLabel?: string; // overrides the mode in the subtitle, e.g. "Barcode"
 }) {
   const [shown, setShown] = useState<Detection | null>(detection);
   const anim = useRef(new Animated.Value(detection ? 1 : 0)).current;
@@ -40,7 +42,7 @@ export function DetectionCard({
   }, [detection, reduceMotion, anim]);
 
   if (!shown) return null;
-  const mode = shown.mode ? MODE_LABELS[shown.mode] : null;
+  const mode = kindLabel ?? (shown.mode ? MODE_LABELS[shown.mode] : null);
   const title = shown.label;
   const spoken = /detected$/i.test(title) ? title : `${title} detected`;
   const motion = {

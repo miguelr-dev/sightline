@@ -80,9 +80,10 @@ export type Features = {
   history: boolean | null;
   ask: boolean | null; // "Ask your history" (/api/ask)
   hatCommands: boolean | null; // voice commands to the hat camera (/api/device/command)
+  barcode: boolean | null; // product lookup by barcode (/api/barcode)
 };
 
-export const UNKNOWN_FEATURES: Features = { elevenlabs: null, transcribe: null, lookup: null, history: null, ask: null, hatCommands: null };
+export const UNKNOWN_FEATURES: Features = { elevenlabs: null, transcribe: null, lookup: null, history: null, ask: null, hatCommands: null, barcode: null };
 
 export type FrameCheck = {
   ready: boolean;
@@ -139,4 +140,16 @@ export type AskAnswer = {
   sections: Section[];
   scans: { id: string; title: string; createdAt: string }[];
   error?: boolean;
+};
+
+// GET /api/barcode: a product by its barcode.
+export type BarcodeResult = {
+  code: string;
+  found: boolean;
+  spokenText: string;
+  sections: Section[];
+  itemKind?: ItemKind;
+  image?: string;
+  title?: string;
+  scanId?: string;
 };

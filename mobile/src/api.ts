@@ -1,6 +1,6 @@
 import { fetch } from "expo/fetch";
 import { File, Paths, UploadType } from "expo-file-system";
-import type { AnalyzeResponse, AskAnswer, DeviceEvent, Features, FrameCheck, ItemKind, LookupResponse, Mode, Scan, Voice } from "./modes";
+import type { AnalyzeResponse, AskAnswer, BarcodeResult, DeviceEvent, Features, FrameCheck, ItemKind, LookupResponse, Mode, Scan, Voice } from "./modes";
 import { cleanSections, httpsUrl, MODES, UNKNOWN_FEATURES } from "./modes";
 import { parseHistoryScan, parseLookup } from "./logic/parse";
 import { withTimeout } from "./logic/timeout";
@@ -74,6 +74,7 @@ export async function getFeatures(): Promise<{ reachable: boolean; features: Fea
         history: typeof f.history === "boolean" ? f.history : null,
         ask: typeof f.ask === "boolean" ? f.ask : null,
         hatCommands: typeof f.hatCommands === "boolean" ? f.hatCommands : null,
+        barcode: typeof f.barcode === "boolean" ? f.barcode : null,
       },
     };
   } catch {
@@ -435,4 +436,32 @@ export async function sendHatCommand(
 /** Let go of the hat so another phone can pair at once. Best effort: ignored if the route is missing. */
 export async function unpairHat(hardwareId: string, pairCode: string): Promise<void> {
   await postJson("/api/device/unpair", { device: hardwareId, pair: pairCode }, 5000).catch(() => undefined);
+}
+
+// Product by barcode. null = route missing or the request failed (the card isn't shown).
+export async function lookupBarcode(code: string, language?: string): Promise<BarcodeResult | null> {
+  if (!baseUrl) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12_000);
+  try {
+    const q = `code=${encodeURIComponent(code)}${language ? `&language=${encodeURIComponent(language)}` : ""}`;
+    const res = await fetch(`${baseUrl}/api/barcode?${q}`, { headers: baseHeaders(), signal: controller.signal });
+    if (!res.ok) return null;
+    const d = (await res.json()) as Record<string, unknown>;
+    if (typeof d.spokenText !== "string" || !d.spokenText.trim()) return null;
+    return {
+      code: typeof d.code === "string" ? d.code : code,
+      found: d.found === true,
+      spokenText: d.spokenText.trim(),
+      sections: cleanSections(d.sections),
+      itemKind: typeof d.itemKind === "string" ? (d.itemKind as BarcodeResult["itemKind"]) : undefined,
+      image: httpsUrl(d.image),
+      title: typeof d.title === "string" && d.title.trim() ? d.title.trim() : undefined,
+      scanId: typeof d.scanId === "string" || typeof d.scanId === "number" ? String(d.scanId) : undefined,
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
