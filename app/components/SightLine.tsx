@@ -20,6 +20,7 @@ import { beepDone, beepError, beepStart, unlockAudio, vibrate } from "@/lib/feed
 import { useSpeech, type SpeakOptions } from "@/lib/useSpeech";
 import { listenOnce, parseCommand, recognitionSupported, type Listener } from "@/lib/voice";
 import { recordOnce, recorderSupported } from "@/lib/recorder";
+import { Magnifier } from "./Magnifier";
 
 const INTRO =
   "Welcome to SightLine. Point your camera at something and tap Capture at the bottom of the screen, and I'll tell you what's there.";
@@ -30,6 +31,17 @@ const MIN_GAP_MS = 1500; // ignore accidental double captures
 const REQUEST_TIMEOUT_MS = 45_000;
 const LOOKUP_TIMEOUT_MS = 20_000; // the server stops itself at about 15 seconds
 const ASK_TIMEOUT_MS = 25_000;
+// Camera zoom, as in the iPhone app (mobile/src/logic/zoom.ts): 1×, 2× and 5× chips, or pinch.
+const ZOOM_CHIPS = [1, 2, 5] as const;
+const MAX_ZOOM = 5;
+type HwZoom = { min: number; max: number } | null; // the camera's own zoom range, where the browser exposes it
+
+/** The chip to highlight for zoom `z`, and the label it shows (the exact zoom between chips, like iOS). */
+function zoomChips(z: number) {
+  const near = ZOOM_CHIPS.reduce((a, c) => (Math.abs(Math.log(z / c)) < Math.abs(Math.log(z / a)) ? c : a), 1 as number);
+  const exact = Math.abs(z - near) / near <= 0.08;
+  return ZOOM_CHIPS.map((c) => ({ c, on: c === near, text: c === near && !exact ? `${Math.round(z * 10) / 10}×` : `${c}×` }));
+}
 
 type CameraState = "off" | "starting" | "on" | "unavailable";
 type Result = AnalyzeResponse & { mode: Mode; langCode: string; question?: string };
@@ -103,6 +115,7 @@ const I = {
   speaker: <Svg size={16}><path d="M4 9h3.5L13 4.5v15L7.5 15H4z" /><path d="M16.5 9a4 4 0 0 1 0 6" /></Svg>,
   speakerOff: <Svg size={16}><path d="M4 9h3.5L13 4.5v15L7.5 15H4z" /><path d="M16.5 9.5l5 5M21.5 9.5l-5 5" /></Svg>,
   send: <Svg size={18}><path d="M12 19V5M6 11l6-6 6 6" /></Svg>,
+  magnify: <Svg size={20}><circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.5 15.5L21 21M10.5 7.5v6M7.5 10.5h6" /></Svg>,
 };
 
 /** Item-dependent detail sections as collapsible rows, like the iPhone app. */
@@ -146,6 +159,10 @@ export default function SightLine() {
   const [web, setWeb] = useState<WebState | null>(null);
   const [webLang, setWebLang] = useState("en-US"); // voice language for the web summary
   const [recording, setRecording] = useState(false); // voice input via ElevenLabs Scribe
+  const [zoom, setZoomState] = useState(1); // 1× to 5×
+  const [hwZoom, setHwZoom] = useState<HwZoom>(null);
+  const [magnify, setMagnify] = useState(false);
+  const [vfCenter, setVfCenter] = useState<string | undefined>(); // CSS zoom centres on the viewfinder
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const frameRef = useRef<HTMLDivElement>(null); // the viewfinder: what's inside it is what gets sent
@@ -157,6 +174,8 @@ export default function SightLine() {
   const lastSendRef = useRef(0);
   const listenerRef = useRef<Listener | null>(null);
   const lookupIdRef = useRef(0);
+  const zoomRef = useRef(1);
+  const pinchRef = useRef<{ d: number; z: number } | null>(null);
 
   const speech = useSpeech();
   const { speak, stop: stopSpeech, setRate, unlock: unlockSpeech, setElevenAvailable } = speech;
@@ -317,6 +336,10 @@ export default function SightLine() {
         audio: false,
       });
       streamRef.current = stream;
+      // Use the camera's own zoom where the browser supports it (Chrome on Android); otherwise
+      // zoom the preview with CSS. Either way the photo is cropped to the corners on screen.
+      const caps = stream.getVideoTracks()[0]?.getCapabilities?.() as (MediaTrackCapabilities & { zoom?: { min: number; max: number } }) | undefined;
+      setHwZoom(caps?.zoom && caps.zoom.max > caps.zoom.min ? { min: caps.zoom.min, max: caps.zoom.max } : null);
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play().catch(() => {});
@@ -333,6 +356,41 @@ export default function SightLine() {
   useEffect(() => {
     return () => streamRef.current?.getTracks().forEach((t) => t.stop());
   }, []);
+
+  const setZoom = useCallback(
+    (f: number) => {
+      const z = Math.max(1, Math.min(MAX_ZOOM, f));
+      zoomRef.current = z;
+      setZoomState(z);
+      const track = streamRef.current?.getVideoTracks()[0];
+      if (hwZoom && track) {
+        track
+          .applyConstraints({ advanced: [{ zoom: Math.min(hwZoom.max, hwZoom.min * z) } as MediaTrackConstraintSet] })
+          .catch(() => setHwZoom(null)); // fall back to CSS zoom
+      }
+    },
+    [hwZoom],
+  );
+
+  useEffect(() => {
+    const el = frameRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      const r = el.getBoundingClientRect();
+      setVfCenter(`${Math.round(r.left + r.width / 2)}px ${Math.round(r.top + r.height / 2)}px`);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [started]);
+
+  // Back to 1× when the page is hidden, as the iPhone app does when it's backgrounded.
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState === "hidden" && zoomRef.current !== 1) setZoom(1);
+    };
+    document.addEventListener("visibilitychange", onHide);
+    return () => document.removeEventListener("visibilitychange", onHide);
+  }, [setZoom]);
 
   // Attach the stream if the video element mounts after the stream is ready.
   useEffect(() => {
@@ -749,6 +807,9 @@ export default function SightLine() {
   const showSheet = Boolean(result) && result !== dismissed;
   const frost = "bg-black/45 text-white backdrop-blur-md";
   const listeningText = recording ? "Listening… tap the mic when done" : "Listening…";
+  // Whatever the camera's own zoom can't reach is made up by scaling the preview.
+  const cssZoom = hwZoom ? (hwZoom.min * zoom) / Math.min(hwZoom.max, hwZoom.min * zoom) : zoom;
+  const touchDist = (t: React.TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
 
   return (
     <div className="relative h-dvh overflow-hidden bg-black text-white">
@@ -756,6 +817,7 @@ export default function SightLine() {
       <video
         ref={videoRef}
         className="pointer-events-none fixed inset-0 h-full w-full object-cover"
+        style={cssZoom > 1.001 ? { transform: `scale(${cssZoom})`, transformOrigin: vfCenter } : undefined}
         playsInline
         muted
         autoPlay
@@ -764,7 +826,7 @@ export default function SightLine() {
       <div aria-hidden="true" className="pointer-events-none fixed inset-x-0 top-0 h-32 bg-gradient-to-b from-black/50 to-transparent" />
       <div aria-hidden="true" className="pointer-events-none fixed inset-x-0 bottom-0 h-80 bg-gradient-to-t from-black/75 to-transparent" />
 
-      <div className="relative mx-auto flex h-dvh max-w-2xl flex-col">
+      <main className="relative mx-auto flex h-dvh max-w-2xl flex-col">
         <header className="flex shrink-0 items-center justify-between gap-3 px-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
           <h1 className="sr-only">SightLine, {cameraStatus}</h1>
           <button
@@ -801,8 +863,21 @@ export default function SightLine() {
           />
         </header>
 
-        {/* Viewfinder: the camera corners mark exactly what goes into the photo. */}
-        <div ref={frameRef} aria-hidden="true" className="relative mx-6 my-4 min-h-0 flex-1">
+        {/* Viewfinder: the camera corners mark exactly what goes into the photo. Two fingers pinch-zoom. */}
+        <div
+          ref={frameRef}
+          aria-hidden="true"
+          className="relative mx-6 my-4 min-h-0 flex-1 touch-none"
+          onTouchStart={(e) => {
+            if (e.touches.length === 2 && camera === "on") pinchRef.current = { d: touchDist(e.touches), z: zoomRef.current };
+          }}
+          onTouchMove={(e) => {
+            if (pinchRef.current && e.touches.length === 2) setZoom((pinchRef.current.z * touchDist(e.touches)) / pinchRef.current.d);
+          }}
+          onTouchEnd={(e) => {
+            if (e.touches.length < 2) pinchRef.current = null;
+          }}
+        >
           <span className="absolute left-0 top-0 h-9 w-9 rounded-tl-xl border-l-[3px] border-t-[3px] border-white" />
           <span className="absolute right-0 top-0 h-9 w-9 rounded-tr-xl border-r-[3px] border-t-[3px] border-white" />
           <span className="absolute bottom-0 left-0 h-9 w-9 rounded-bl-xl border-b-[3px] border-l-[3px] border-white" />
@@ -847,6 +922,26 @@ export default function SightLine() {
                 ))}
               </select>
             </label>
+          </div>
+        )}
+
+        {/* Zoom chips, like the iPhone app */}
+        {camera === "on" && (
+          <div role="group" aria-label="Zoom" className="mt-2 flex shrink-0 justify-center">
+            <div className={`flex gap-1 rounded-full p-1 ${frost}`}>
+              {zoomChips(zoom).map(({ c, on, text }) => (
+                <button
+                  key={c}
+                  type="button"
+                  aria-pressed={on}
+                  aria-label={on && text !== `${c}×` ? `${text.slice(0, -1)} times zoom` : `${c} times zoom`}
+                  onClick={() => setZoom(c)}
+                  className={`h-11 min-w-11 rounded-full px-2 text-[15px] font-bold tabular-nums ${focusLight} ${on ? "bg-white text-black" : "text-white"}`}
+                >
+                  {text}
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
@@ -924,7 +1019,7 @@ export default function SightLine() {
             )}
           </div>
         </div>
-      </div>
+      </main>
 
       {/* The answer sheet */}
       {showSheet && result && (
@@ -943,8 +1038,19 @@ export default function SightLine() {
 
           <div className="flex min-h-0 flex-col gap-3 overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
             {lastImage && (
-              // eslint-disable-next-line @next/next/no-img-element -- in-memory data URL
-              <img src={`data:image/jpeg;base64,${lastImage}`} alt="The photo you took" className="max-h-56 w-full rounded-2xl object-cover" />
+              <button
+                type="button"
+                onClick={() => setMagnify(true)}
+                aria-label="Your photo. Magnify."
+                aria-haspopup="dialog"
+                className={`relative block w-full shrink-0 rounded-2xl ${focus}`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element -- in-memory data URL */}
+                <img src={`data:image/jpeg;base64,${lastImage}`} alt="" className="max-h-56 w-full rounded-2xl object-cover" />
+                <span aria-hidden="true" className="absolute bottom-3 right-3 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white">
+                  {I.magnify}
+                </span>
+              </button>
             )}
             {result.question && !busy && (
               <p className="text-[15px] text-[#55555A]">
@@ -1112,6 +1218,8 @@ export default function SightLine() {
           </div>
         </section>
       )}
+
+      {lastImage && <Magnifier src={`data:image/jpeg;base64,${lastImage}`} open={magnify} onClose={() => setMagnify(false)} />}
     </div>
   );
 }

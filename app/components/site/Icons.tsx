@@ -113,6 +113,13 @@ export const SmallCheck = ({ size = 11 }: P) => (
   </svg>
 );
 
+export const Magnify = ({ size = 12 }: P) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" {...base}>
+    <circle cx="10.5" cy="10.5" r="6.5" />
+    <path d="M15.5 15.5L21 21M10.5 7.5v6M7.5 10.5h6" />
+  </svg>
+);
+
 export const ArrowUp = ({ size = 12 }: P) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" {...base}>
     <path d="M12 19V5M6 11l6-6 6 6" />

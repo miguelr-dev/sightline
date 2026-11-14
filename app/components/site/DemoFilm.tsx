@@ -56,7 +56,10 @@ function frameAt(t: number): Frame {
   if (ci === 0) {
     // Auto: the app spots the menu, the user taps the card, and the answer sheet slides up.
     f.showLang = true;
-    if (lt >= 1.4 && lt < 3.3) phone.detect = { title: "Menú del día", sub: "Tap to read · Translate", pressed: lt >= 3 };
+    if (lt >= 1.4 && lt < 3.3) {
+      phone.detect = { title: "Menú del día", sub: "Tap to read · Translate", pressed: lt >= 3 };
+      phone.vfClass = "track"; // the brackets lock onto the menu board
+    }
     phone.status = lt >= 3.3 && lt < 4.6 ? "Reading…" : null;
     const n = Math.floor((lt - 5) * 3.2);
     f.caption = lt < 1.4 ? "" : lt < 4.6 ? "Menu detected. Tap to read." : words(MENU_LINE, n);
@@ -106,6 +109,7 @@ function frameAt(t: number): Frame {
     phone.img = IMG.medicinePortrait;
     phone.mode = "menu";
     phone.thumb = IMG.sign;
+    phone.zoom = lt >= 0.9 ? 2 : 1; // small print: tap 2× before the photo
     shoot();
     const idx = Math.floor((lt - 4) / 1.8);
     f.showCaption = lt < 4;
