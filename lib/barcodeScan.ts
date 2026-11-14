@@ -1,4 +1,4 @@
-// Client-side barcode scanning for /app's BARCODE mode, matching the iPhone app
+// Client-side barcode scanning for /app (it watches for barcodes in every mode), following the iPhone app
 // (mobile/src/logic/barcode.ts): retail barcodes only, a code must be seen twice before it's
 // looked up, and a code that was just read is ignored for a while.
 
@@ -53,6 +53,11 @@ export function onSighting(s: ScanState, code: string, now: number): { state: Sc
     return { state: { last: null, hold: { code, until: now + READ_HOLD_MS } }, confirmed: true };
   }
   return { state: { ...s, last: { code, at: now } }, confirmed: false };
+}
+
+/** Don't offer `code` again until `ms` from now (the user hid its card). */
+export function holdCode(s: ScanState, code: string, now: number, ms = READ_HOLD_MS): ScanState {
+  return { last: null, hold: { code, until: now + ms } };
 }
 
 /** The answer for the held code was closed: allow it again after a short pause. */
