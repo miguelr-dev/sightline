@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { existsSync } from "node:fs";
 import { ZXING_WASM_VERSION } from "barcode-detector/ponyfill";
-import { initialScanState, normalizeBarcode, onAnswerClosed, onSighting, upcEToA } from "@/lib/barcodeScan";
+import { holdCode, initialScanState, normalizeBarcode, onAnswerClosed, onSighting, upcEToA } from "@/lib/barcodeScan";
 
 describe("normalizeBarcode", () => {
   it("accepts valid retail codes", () => {
@@ -55,6 +55,21 @@ describe("onSighting", () => {
     expect(r.confirmed).toBe(false);
     r = onSighting(r.state, "049000028911", 5100);
     r = onSighting(r.state, "049000028911", 5300);
+    expect(r.confirmed).toBe(true);
+  });
+});
+
+describe("holdCode", () => {
+  it("ignores a hidden card's barcode for 10 s, but not other barcodes", () => {
+    const held = holdCode(initialScanState, "049000028911", 1000);
+    let r = onSighting(held, "049000028911", 2000);
+    r = onSighting(r.state, "049000028911", 2200);
+    expect(r.confirmed).toBe(false);
+    r = onSighting(r.state, "3017620422003", 2400);
+    r = onSighting(r.state, "3017620422003", 2600);
+    expect(r.confirmed).toBe(true);
+    r = onSighting(held, "049000028911", 11_100);
+    r = onSighting(r.state, "049000028911", 11_300);
     expect(r.confirmed).toBe(true);
   });
 });
