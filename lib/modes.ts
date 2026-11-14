@@ -14,7 +14,7 @@ export const MODE_HINTS: Record<Mode, string> = {
   read: "Reads the text on the item you are showing, or all visible text if there is no single item.",
   describe: "Describes the item you are showing, or the scene if there is no single item.",
   menu: "Summarizes the menu, product, or medicine label you are showing.",
-  translate: "Translates the text on the item you are showing, or all visible text if there is no single item.",
+  translate: "Translates the sign, menu, or label you are showing into your language.",
 };
 
 export type Language = { name: string; code: string };

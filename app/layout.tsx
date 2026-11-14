@@ -1,5 +1,13 @@
 import type { Metadata, Viewport } from "next";
+import { Atkinson_Hyperlegible } from "next/font/google";
 import "./globals.css";
+
+const atkinson = Atkinson_Hyperlegible({
+  weight: ["400", "700"],
+  subsets: ["latin"],
+  variable: "--font-sans",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "SightLine",
@@ -27,7 +35,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="h-full antialiased">
+    <html lang="en" className={`${atkinson.variable} h-full antialiased`}>
       <body className="min-h-full">{children}</body>
     </html>
   );
