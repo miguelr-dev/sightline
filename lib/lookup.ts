@@ -17,6 +17,8 @@ import { attachLookup, getCachedLookup, isScanId, lookupKey, putCachedLookup } f
 // spoken answer. Used by /api/lookup and by the hat camera's /api/device/frame.
 
 const TOTAL_BUDGET_MS = 15_000;
+/** Bump when the summary prompt changes, so cached summaries from older rules aren't reused. */
+const LOOKUP_PROMPT_VERSION = "2026-11-14.2";
 const SUMMARY_RESERVE_MS = 4_000; // time kept back for the Claude summary
 const IMAGE_GRACE_MS = 300; // how long a finished summary waits for a still-running image search
 
@@ -72,7 +74,7 @@ function summarySystem(kind: ItemKind, language: string): string {
 What was photographed: ${KIND_GUIDE[kind]}
 
 Write everything in ${language}. Reply with three fields:
-- spokenText: read aloud, so keep it to the gist: one or two short sentences, about 35 words. Start with "From the web:" (in ${language}), then go straight to the facts, without describing the results or the photo ("Red Bull has 80 milligrams of caffeine…", not "The results show…"). If any result shows a recall, safety alert or FDA warning that matches this item, say that first, with the date if given. Plain spoken sentences, no URLs or markdown, numbers written so a voice reads them well. If the results are unrelated or empty, say you couldn't find anything useful on the web.
+- spokenText: read aloud, so keep it to the gist: one or two short sentences, about 35 words. Start with "From the web:" (in ${language}), then go straight to the facts, saying where each comes from ("Online, …", "The FDA lists …"), without describing the results or the photo ("Red Bull has 80 milligrams of caffeine…", not "The results show…"). If a result shows a recall, safety alert or FDA warning for this exact item, say that first, with the date if given. It counts as this item only if the brand and product match (and the size or lot, when the result names one); otherwise say "A recall exists for a similar product; check the lot number." Never say this product is safe or recall-free; at most say no recall turned up in these results. Plain spoken sentences, no URLs or markdown, numbers written so a voice reads them well. If the results are unrelated or empty, say you couldn't find anything useful on the web.
 - sections: the other facts, in 0 to 5 short sections with titles that fit, plain text, naming the site each fact came from. Skip anything the results don't cover.
 - sources: the numbers of the results you actually used, most important first, at most 4.
 
@@ -216,7 +218,8 @@ export async function webLookup(
     }
 
     // 2. Seen this exact search in the last 24 hours? Answer from the Neon cache.
-    const cacheKey = lookupKey(query, kind, language);
+    // The version makes summaries written under older prompt rules miss the cache.
+    const cacheKey = `${lookupKey(query, kind, language)}|${LOOKUP_PROMPT_VERSION}`;
     const hit = await getCachedLookup(cacheKey);
     if (hit) return done(hit, { cacheKey, fromCache: true });
 
@@ -308,7 +311,11 @@ export async function webLookup(
         sources: results.slice(0, 4).map(toSource),
       });
     }
-    const sections = cleanSections(summary?.sections, 5);
+    // Everything here came from the web, not the label.
+    const sections = cleanSections(summary?.sections, 5).map((x) => ({
+      ...x,
+      provenance: "web" as const,
+    }));
     return done(
       {
         spokenText,

@@ -4,12 +4,15 @@ import {
   MODES,
   type AnalyzeResponse,
   type ItemKind,
+  type ConversationTurn,
   type Mode,
   type RequestMode,
+  type Section,
 } from "@/lib/modes";
 import { after } from "next/server";
 import { randomUUID } from "node:crypto";
 import { PROMPT_VERSION, systemPrompt, userPrompt } from "@/lib/prompts";
+import { BOOK_SCHEMA, bookSystemPrompt, buildPage, type BookReply } from "@/lib/book";
 import { imageMediaType } from "@/lib/http";
 import {
   analysisKey,
@@ -23,6 +26,7 @@ import {
   SECTIONS_SCHEMA,
   analyzeModel,
   askJson,
+  bookModel,
   cleanSections,
   sectionsToText,
 } from "@/lib/claude";
@@ -54,6 +58,14 @@ const ANGLE_WORDS =
   /\b(nutrition|facts|caffeine|sugar|price|uses|recalls?|fda|warnings?|reviews?|menu|hours|allergens?|summary)\b/gi;
 
 function scanTitle(r: AnalyzeResponse): string {
+  if (r.page) {
+    const start = r.page.text
+      .split(/\s+/)
+      .slice(0, 6)
+      .join(" ")
+      .replace(/[.,;:]+$/, "");
+    return `${r.page.pageNumber ? `Page ${r.page.pageNumber}: ` : ""}${start}`.slice(0, 80);
+  }
   const fromQuery = (r.webQuery ?? "").replace(ANGLE_WORDS, " ").replace(/\s+/g, " ").trim();
   if (fromQuery) return fromQuery.slice(0, 80);
   const words = r.spokenText.split(/\s+/).slice(0, 8).join(" ");
@@ -79,6 +91,10 @@ export type AnalyzeInput = {
   isFollowUp?: boolean;
   key?: string; // target id from a frame check, saved with the scan
   device?: string; // history owner (the phone's x-sightline-device ID)
+  /** Book mode (with mode "read"): the exact full page, its sentences and signature. */
+  book?: boolean;
+  /** Earlier questions and answers about this same photo or page (at most MAX_TURNS). */
+  conversation?: ConversationTurn[];
   /** "after" (default): write cache and history after the response is sent. "await": write now.
    *  "defer": start writing now and return the write as `saved`, for the caller to await later. */
   persist?: "after" | "await" | "defer";
@@ -153,6 +169,28 @@ export function slugKey(v: unknown): string | undefined {
 }
 
 /** Read one photo: from the cache if this exact request was answered before, else with Claude. */
+export const MAX_TURNS = 6;
+
+/** The last MAX_TURNS well-formed turns, trimmed and capped in length. */
+export function cleanConversation(v: unknown): ConversationTurn[] {
+  if (!Array.isArray(v)) return [];
+  const turns: ConversationTurn[] = [];
+  for (const t of v) {
+    if (!t || typeof t !== "object") continue;
+    const { question, answer } = t as Record<string, unknown>;
+    if (typeof question !== "string" || typeof answer !== "string") continue;
+    const q = question.trim().slice(0, 300);
+    const a = answer.trim().slice(0, 600);
+    if (q && a) turns.push({ question: q, answer: a });
+  }
+  return turns.slice(-MAX_TURNS);
+}
+
+/** Label-read sections are tagged as coming from the photo. */
+function fromLabel(sections: { title: string; body: string }[]): Section[] {
+  return sections.map((s) => ({ ...s, provenance: "label" as const }));
+}
+
 export async function analyzePhoto(input: AnalyzeInput): Promise<AnalyzeResult> {
   if (!process.env.ANTHROPIC_API_KEY) {
     console.error("ANTHROPIC_API_KEY is not set");
@@ -160,20 +198,28 @@ export async function analyzePhoto(input: AnalyzeInput): Promise<AnalyzeResult> 
   }
 
   const data = input.image.replace(/^data:image\/\w+;base64,/, "");
-  const { mode, question: followUp } = input;
+  const book = input.book === true;
+  const mode: RequestMode = book ? "read" : input.mode;
+  const followUp = input.question;
+  const conversation = cleanConversation(input.conversation);
   const targetLanguage = input.language;
   const persist = input.persist ?? "after";
-  const model = analyzeModel();
-  const ctx = {
-    cacheKey: analysisKey({
+  // A book page itself (no question) is a transcription job with its own model.
+  const transcribing = book && !followUp;
+  const model = transcribing ? bookModel() : analyzeModel();
+  const keyFor = (q?: string, turns?: ConversationTurn[]) =>
+    analysisKey({
       image: data,
-      mode,
+      mode: book ? "read:book" : mode,
       language: targetLanguage,
       // A fresh question gets different wording, so it mustn't reuse a follow-up's cached answer.
-      question: followUp && input.isFollowUp === false ? `fresh:${followUp}` : followUp,
-      model,
+      question: q && input.isFollowUp === false ? `fresh:${q}` : q,
+      conversation: turns,
+      model: q ? analyzeModel() : model,
       version: PROMPT_VERSION,
-    }),
+    });
+  const ctx = {
+    cacheKey: keyFor(followUp, conversation),
     device: input.device,
     mode,
     key: slug(input.key),
@@ -190,17 +236,72 @@ export async function analyzePhoto(input: AnalyzeInput): Promise<AnalyzeResult> 
   }
 
   const client = new Anthropic();
+  const image = {
+    type: "image" as const,
+    source: { type: "base64" as const, media_type: imageMediaType(data), data },
+  };
 
   try {
+    if (transcribing) {
+      // Book mode: every word of the page, in reading order. Accuracy over speed.
+      const reply = await askJson<BookReply>(client, {
+        model,
+        maxTokens: 12000, // a dense two-page spread is about 1,500 words
+        system: bookSystemPrompt(targetLanguage),
+        content: [image, { type: "text", text: "Transcribe this page." }],
+        schema: BOOK_SCHEMA,
+      });
+      if (!reply) return fail("Sorry, I couldn't read that page. Please try again.", 200);
+      const { page, spokenText } = buildPage({
+        pageText: typeof reply.pageText === "string" ? reply.pageText : "",
+        pageNumber: typeof reply.pageNumber === "string" ? reply.pageNumber : "",
+        complete: reply.complete !== false,
+        cutOff: typeof reply.cutOff === "string" ? reply.cutOff : "",
+      });
+      const sections: Section[] = page.text
+        ? [
+            {
+              title: page.pageNumber ? `Page ${page.pageNumber}` : "Page",
+              body: page.text,
+              provenance: "label",
+            },
+          ]
+        : [];
+      return finish(
+        {
+          spokenText: page.text
+            ? spokenText
+            : "I couldn't find any text on this page. Try holding the book flat under good light.",
+          sections,
+          details: page.text,
+          webQuery: "",
+          itemKind: "book",
+          mode: "read",
+          page,
+        },
+        { ...ctx, mode: "read", cached: false },
+        persist,
+      );
+    }
+
+    // A question about a book page gets the page's exact text, if it was read before.
+    const pageText = book
+      ? (await getCachedAnalysis(keyFor(undefined, undefined)))?.page?.text
+      : undefined;
+
     const parsed = await askJson<Parsed>(client, {
       model,
       maxTokens: 3000, // a full page of text fits; spoken answers stay short
       system: systemPrompt(mode, targetLanguage),
       content: [
-        { type: "image", source: { type: "base64", media_type: imageMediaType(data), data } },
+        image,
         {
           type: "text",
-          text: userPrompt(mode, targetLanguage, followUp, { isFollowUp: input.isFollowUp }),
+          text: userPrompt(mode, targetLanguage, followUp, {
+            isFollowUp: input.isFollowUp,
+            conversation,
+            pageText,
+          }),
         },
       ],
       schema: mode === "auto" ? AUTO_SCHEMA : OUTPUT_SCHEMA,
@@ -214,7 +315,7 @@ export async function analyzePhoto(input: AnalyzeInput): Promise<AnalyzeResult> 
       typeof parsed.spokenText === "string" && parsed.spokenText.trim()
         ? parsed.spokenText.trim()
         : "I couldn't make out anything in that photo. Please try again.";
-    const sections = cleanSections(parsed.sections);
+    const sections = fromLabel(cleanSections(parsed.sections));
     const itemKind: ItemKind = ITEM_KINDS.includes(parsed.itemKind as ItemKind)
       ? (parsed.itemKind as ItemKind)
       : "none";

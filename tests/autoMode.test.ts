@@ -35,6 +35,7 @@ describe("auto mode: validation", () => {
 
   it("bumps the prompt version for the auto prompt", () => {
     expect(PROMPT_VERSION).not.toBe("2026-11-14.6");
+    expect(PROMPT_VERSION).not.toBe("2026-11-14.7");
   });
 });
 
@@ -54,6 +55,13 @@ describe("auto mode: the prompt", () => {
       expect(p).toContain(m);
     }
     expect(p.split("First decide what the user is pointing the camera at").length - 1).toBe(1);
+  });
+
+  it("handles receipts, bills, forms and handwriting", () => {
+    expect(p).toMatch(/receipt[^\n]*merchant[^\n]*date[^\n]*total/i);
+    expect(p).toMatch(/bill[^\n]*amount due[^\n]*due date/i);
+    expect(p).toMatch(/form[^\n]*each field[^\n]*(don't|never) invent/i);
+    expect(p).toMatch(/handwriting[^\n]*\(unclear\)/i);
   });
 
   it("translates into the user's language when it picks Translate", () => {

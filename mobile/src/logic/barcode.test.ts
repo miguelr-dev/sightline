@@ -160,3 +160,20 @@ describe("reduceReadAll: Read all sections in order", () => {
     expect(r.effects).toEqual([]);
   });
 });
+
+describe("BARCODE mode rescan after closing the sheet", () => {
+  it("holds the same code briefly so the sheet doesn't reopen on the product still in view", () => {
+    let s = reduceBarcode(initialBarcodeState, { type: "read", code: COKE, at: 1000 }).state;
+    s = reduceBarcode(s, { type: "sheetClosed", at: 5000, holdMs: 3000 }).state;
+    s = reduceBarcode(s, { type: "seen", code: COKE, at: 5200 }).state;
+    expect(reduceBarcode(s, { type: "seen", code: COKE, at: 5400 }).effects).not.toContainEqual({ type: "confirmed", code: COKE });
+    s = reduceBarcode(s, { type: "seen", code: COKE, at: 8100 }).state;
+    expect(reduceBarcode(s, { type: "seen", code: COKE, at: 8300 }).effects).toContainEqual({ type: "confirmed", code: COKE });
+  });
+  it("a different product is read straight away", () => {
+    let s = reduceBarcode(initialBarcodeState, { type: "read", code: COKE, at: 1000 }).state;
+    s = reduceBarcode(s, { type: "sheetClosed", at: 5000, holdMs: 3000 }).state;
+    s = reduceBarcode(s, { type: "seen", code: OTHER, at: 5200 }).state;
+    expect(reduceBarcode(s, { type: "seen", code: OTHER, at: 5400 }).effects).toContainEqual({ type: "confirmed", code: OTHER });
+  });
+});

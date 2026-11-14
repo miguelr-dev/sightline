@@ -162,6 +162,7 @@ export function analysisKey(parts: {
   mode: string;
   language: string;
   question?: string;
+  conversation?: { question: string; answer: string }[]; // earlier turns change the answer
   model: string;
   version: string;
 }): string {
@@ -169,7 +170,14 @@ export function analysisKey(parts: {
     .update(parts.image)
     .update(
       "\0" +
-        [parts.mode, parts.language, parts.question ?? "", parts.model, parts.version].join("\0"),
+        [
+          parts.mode,
+          parts.language,
+          parts.question ?? "",
+          parts.model,
+          parts.version,
+          parts.conversation?.length ? JSON.stringify(parts.conversation) : "",
+        ].join("\0"),
     )
     .digest("hex");
 }

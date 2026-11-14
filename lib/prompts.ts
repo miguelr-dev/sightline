@@ -3,7 +3,7 @@ import { MODES, type Mode, type RequestMode } from "./modes";
 // Server-only: mode-specific instructions for Claude.
 
 /** Bump when the prompts change, so cached answers from older prompts aren't reused. */
-export const PROMPT_VERSION = "2026-11-14.7";
+export const PROMPT_VERSION = "2026-11-14.8";
 
 const BASE = `You are SightLine, a visual assistant that reads the world out loud, for blind and low-vision people and for travelers who can't read the local language. The user pointed a phone camera at something. They can't see it, so your answer is their only view of it.
 
@@ -32,6 +32,16 @@ Rules:
 
 const FOCUS = `First decide what the user is pointing the camera at. If there is a clear main item (something held in a hand, close to the camera, or centered and filling a good part of the frame, such as a letter, package, bottle, receipt, menu, sign, book page or screen), answer only about that item and ignore text and objects around or behind it: other signs, posters, shelves, price tags and screens. If several similar items are in view and none is clearly in front, say how many there are, answer about the one in the center, and tell the user to hold up the one they want. If part of the item is cut off, covered by a finger or turned away, say which part and how to fix it, for example "The prices are cut off on the right. Move the phone back a little." If there is no single main item, such as a wall of signs, a storefront or a street, cover what's visible, most prominent first.`;
 
+// Printed things that need their own order, in Read and Auto.
+const DOCUMENT_TYPES = `Special documents (use chosenMode "read" for these in Auto):
+- A receipt: spokenText gives the merchant, the date and the total first; sections list the line items.
+- A bill or statement: the amount due and the due date first, then who it's from.
+- A form: say what the form is, then one section for each field explaining what it asks; don't invent instructions that aren't printed.
+- Handwriting: copy it verbatim, writing (unclear) for any word you can't read.`;
+
+// Questions about what's in a product: what's printed comes first, and safety is never inferred.
+const LABEL_FIRST = `If the question is about ingredients, allergens, warnings or safety, answer from what is printed and say so: "The label lists peanuts." If it isn't printed, say what the label shows and what you can't see: "The ingredient list doesn't mention peanuts, but I can't see a 'may contain' statement." Never say or infer that something is safe.`;
+
 // How "The image shows…" starts in some target languages, to name it as forbidden.
 const PREAMBLE_EXAMPLE: Record<string, string> = {
   Spanish: "La imagen muestra",
@@ -45,6 +55,7 @@ const PREAMBLE_EXAMPLE: Record<string, string> = {
 
 const MODE_INSTRUCTIONS: Record<Mode, (language: string) => string> = {
   read: () => `Mode: Read. ${FOCUS}\nTranscribe that text in natural reading order: headings first, then body text, top to bottom, left to right.
+${DOCUMENT_TYPES}
 - Transcription: copy spelling exactly as printed, even if it looks wrong (a misprint such as "Reliver" stays "Reliver"); never correct or modernize words.
 - spokenText: the text itself, word for word, never paraphrased or summarized. In Read mode only, read all of it if it's 35 words or fewer. If it's longer, give its title or what it is in a few words ("Letter from the city water department."), then read its first sentence word for word. Start with the first words of the text itself. Don't say what it's printed on or how it's laid out: no "Slide with three bullets:", "A page that says" or "A screen showing".
 - sections: the complete text, word for word, keeping line breaks: one "Full text" section, or one section per heading if the document has headings.
@@ -80,6 +91,7 @@ Then choose the best mode for this photo, set chosenMode to it, and follow only 
 - foreign-language text (not in ${language}): "translate" (Translate into ${language})
 - documents, signs, screens or plain text in ${language}: "read"
 - scenes or no text: "describe"
+${DOCUMENT_TYPES}
 
 ${modes}`;
 }
@@ -93,7 +105,11 @@ export function userPrompt(
   mode: RequestMode,
   language: string,
   question?: string,
-  opts: { isFollowUp?: boolean } = {},
+  opts: {
+    isFollowUp?: boolean;
+    conversation?: { question: string; answer: string }[]; // earlier turns about this photo
+    pageText?: string; // book mode: the page's exact text, for questions about it
+  } = {},
 ): string {
   if (question) {
     const answerLanguage =
@@ -104,8 +120,17 @@ export function userPrompt(
       opts.isFollowUp === false
         ? `The user is pointing the camera at this and asks: "${question}"`
         : `This is the same photo as before. The user is asking a follow-up question about it: "${question}"`;
-    return `${asked}
-Answer it directly in spokenText, in one or two sentences, in ${answerLanguage}. Start with the answer itself, with no preamble about the photo. If the photo doesn't show the answer, say so. Put any supporting detail in sections.`;
+    const earlier = opts.conversation?.length
+      ? `Earlier in this conversation about this photo (use it to work out what "it", "that one" or "the first one" means):\n${opts.conversation
+          .map((t) => `Q: ${t.question}\nA: ${t.answer}`)
+          .join("\n")}\n\n`
+      : "";
+    const page = opts.pageText
+      ? `The page's exact text, for reference:\n"""\n${opts.pageText}\n"""\n\n`
+      : "";
+    return `${page}${earlier}${asked}
+Answer it directly in spokenText, in one or two sentences, in ${answerLanguage}. Start with the answer itself, with no preamble about the photo. If the photo doesn't show the answer, say so. Put any supporting detail in sections.
+${LABEL_FIRST}`;
   }
   // Translate: repeat the target language last, where the model weighs it most.
   return mode === "translate" ? `Here is the photo. Reply in ${language}.` : "Here is the photo.";

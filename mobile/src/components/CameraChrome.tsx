@@ -11,7 +11,7 @@ import { Icon } from "./ui";
 
 export const CAM_YELLOW = "#FFD60A"; // iOS Camera's selected-mode yellow (paired with bold + dot)
 
-const SHORT: Record<StripMode, string> = { auto: "AUTO", read: "READ", describe: "DESCRIBE", menu: "MENU", translate: "TRANSLATE" };
+const SHORT: Record<StripMode, string> = { auto: "AUTO", barcode: "BARCODE", read: "READ", describe: "DESCRIBE", menu: "MENU", translate: "TRANSLATE" };
 
 /** Frosted, rounded surface. Light blur with dark text; falls back to translucent white. */
 export function Frost({ children, style, dark }: { children: ReactNode; style?: StyleProp<ViewStyle>; dark?: boolean }) {
@@ -144,7 +144,19 @@ export function ModeStrip({
 }
 
 /** Big round white shutter, iOS style. */
-export function Shutter({ onPress, busy, disabled, label }: { onPress: () => void; busy: boolean; disabled?: boolean; label: string }) {
+export function Shutter({
+  onPress,
+  busy,
+  disabled,
+  label,
+  glyph,
+}: {
+  onPress: () => void;
+  busy: boolean;
+  disabled?: boolean;
+  label: string;
+  glyph?: ReactNode; // e.g. a barcode symbol in BARCODE mode
+}) {
   return (
     <Pressable
       onPress={onPress}
@@ -154,7 +166,11 @@ export function Shutter({ onPress, busy, disabled, label }: { onPress: () => voi
       accessibilityState={{ busy, disabled: !!disabled }}
       style={({ pressed }) => [f.shutterRing, (disabled || busy) && { opacity: 0.6 }]}
     >
-      {({ pressed }) => <View style={[f.shutterCore, pressed && { transform: [{ scale: 0.92 }] }, busy && f.shutterBusy]} />}
+      {({ pressed }) => (
+        <View style={[f.shutterCore, pressed && { transform: [{ scale: 0.92 }] }, busy && f.shutterBusy, { alignItems: "center", justifyContent: "center" }]}>
+          {glyph}
+        </View>
+      )}
     </Pressable>
   );
 }

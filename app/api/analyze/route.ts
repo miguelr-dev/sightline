@@ -1,6 +1,6 @@
 import { LANGUAGES, isRequestMode } from "@/lib/modes";
 import { deviceId } from "@/lib/db";
-import { analyzePhoto } from "@/lib/analyze";
+import { analyzePhoto, cleanConversation } from "@/lib/analyze";
 import { readJson } from "@/lib/http";
 import { interpretUtterance } from "@/lib/utterance";
 
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
       : fail("Sorry, that request didn't come through. Please try again.", 400);
   }
 
-  const { image, mode, language, question, key, utterance } = parsed.body;
+  const { image, mode, language, question, key, utterance, book, conversation } = parsed.body;
 
   if (typeof image !== "string" || image.length < 100) {
     return fail("I didn't get a photo. Please try capturing again.", 400);
@@ -49,6 +49,9 @@ export async function POST(request: Request) {
     question: said ? said.question : followUp,
     ...(said?.question ? { isFollowUp: false } : {}),
     key: typeof key === "string" ? key : undefined,
+    // Book mode: the exact full page (with mode "read"); earlier turns for follow-ups.
+    ...(book === true ? { book: true } : {}),
+    ...(Array.isArray(conversation) ? { conversation: cleanConversation(conversation) } : {}),
     device: deviceId(request),
   });
   // Auto mode: tell the app which mode was chosen ("Reading the sign…").

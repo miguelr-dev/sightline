@@ -6,6 +6,14 @@ import Anthropic from "@anthropic-ai/sdk";
 export const DEFAULT_MODEL = "claude-haiku-5-5";
 /** Fast model for web-lookup summaries and frame checks. Override with ANTHROPIC_FAST_MODEL. */
 export const DEFAULT_FAST_MODEL = "claude-haiku-5-5";
+/** Model for book mode, where every word matters more than speed. Override with ANTHROPIC_BOOK_MODEL. */
+// Sonnet 5.5: 0% word errors on single pages and a two-page spread in our test; Haiku 5.5 kept a
+// running head on the spread (1%). Both take about 2-4 s per page.
+export const DEFAULT_BOOK_MODEL = "claude-sonnet-5-5";
+
+export function bookModel(): string {
+  return process.env.ANTHROPIC_BOOK_MODEL || DEFAULT_BOOK_MODEL;
+}
 
 // Models that accept the server-side refusal fallback parameter (Haiku 5.5 does not).
 const FALLBACK_MODELS = new Set([

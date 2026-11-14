@@ -120,7 +120,7 @@ export function demoState(): Demo | null {
           : q === "recent" || q === "recent-ask"
             ? "recent"
             : "none",
-    mode: q === "translate" ? "translate" : "auto",
+    mode: q === "translate" ? "translate" : q === "barcode-mode" ? "barcode" : "auto",
     photo,
     voices: VOICES,
     hint: null,

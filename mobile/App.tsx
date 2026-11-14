@@ -65,7 +65,7 @@ import { conversationFrom, trimConversation, type Turn } from "./src/logic/conve
 import { initialBook, reduceBook, sentenceOwner, type BookEvent, type BookPage, type BookState } from "./src/logic/book";
 import { BookView } from "./src/components/BookView";
 import { useTurnDetector } from "./src/useTurnDetector";
-import { analyzeModeFor, autoRetry, frameCheckMode, headerLabel, STRIP_LABELS, STRIP_MODES, type StripMode } from "./src/logic/modeStrip";
+import { analyzeModeFor, autoRetry, barcodeAction, concreteMode, detectAllowedIn, frameCheckMode, headerLabel, STRIP_LABELS, STRIP_MODES, type StripMode } from "./src/logic/modeStrip";
 import { webSpeechPolicy, type WebTrigger } from "./src/logic/webSpeech";
 import { initialBarcodeState, normalizeBarcode, reduceBarcode, type BarcodeEvent } from "./src/logic/barcode";
 import {
@@ -410,7 +410,7 @@ function Main() {
       const fresh: Shot = {
         id,
         photo: null,
-        mode: strip === "auto" ? (opts.suggested ?? "describe") : strip,
+        mode: concreteMode(strip, opts.suggested),
         strip,
         suggested: opts.suggested ?? null,
         language: s.language,
@@ -445,6 +445,7 @@ function Main() {
     !demo &&
     !hat &&
     !bookActive &&
+    detectAllowedIn(settings.mode) &&
     Platform.OS !== "web" &&
     settings.autoCapture &&
     appActive &&
@@ -533,7 +534,8 @@ function Main() {
   // ---- barcodes ------------------------------------------------------------------------------------
   // On-device scanning in every mode but Translate. A code seen twice within 500 ms is looked up
   // and offered as a card; nothing is spoken until the user taps it. Logic: logic/barcode.ts.
-  const barcodeOn = !hat && !demo && !bookActive && connection.features.barcode === true && settings.mode !== "translate" && sheet === "none";
+  const barcodeOn =
+    !hat && !demo && !bookActive && connection.features.barcode === true && barcodeAction(settings.mode) !== "off" && sheet === "none";
   const barcodeState = useRef(initialBarcodeState);
   const [barcodeCard, setBarcodeCardState] = useState<BarcodeResult | null>(demo?.barcode ?? null);
   const barcodeCardRef = useRef<BarcodeResult | null>(barcodeCard);
@@ -557,6 +559,8 @@ function Main() {
     const res = await lookupBarcode(code);
     if (!res || barcodeState.current.confirmed !== code) return; // failed, or it left the frame
     setBarcodeCard(res);
+    // BARCODE mode: the user chose it, so open and speak right away (like book mode).
+    if (barcodeAction(live.current.settings.mode) === "openAndSpeak") return readBarcode();
     showDetection(null, true); // the barcode card takes priority
     if (live.current.screenReader) {
       AccessibilityInfo.announceForAccessibility(`${res.title ?? "Product"} barcode. Double-tap the card to read.`);
@@ -619,7 +623,10 @@ function Main() {
   useEffect(() => {
     if (sheet === "none") {
       auto.resume();
-      dispatchBarcode({ type: "sheetClosed" });
+      // In BARCODE mode the product is usually still in view: wait a moment before reopening it.
+      dispatchBarcode(
+        live.current.settings.mode === "barcode" ? { type: "sheetClosed", at: Date.now(), holdMs: 3000 } : { type: "sheetClosed" },
+      );
     }
   }, [sheet]);
 
@@ -735,7 +742,7 @@ function Main() {
     silence(); // a new answer replaces whatever was being said
     const token = speakToken.current;
     const st0 = live.current.settings.mode;
-    const mode = MODES.includes(p.mode as Mode) ? (p.mode as Mode) : st0 === "auto" ? "describe" : st0;
+    const mode = MODES.includes(p.mode as Mode) ? (p.mode as Mode) : concreteMode(st0);
     const cmdType = (p.command as { type?: unknown } | undefined)?.type;
     const webExplicit = cmdType === "lookup"; // "search for this": the user asked, so speak it
     const next: Shot = {
@@ -1257,7 +1264,7 @@ function Main() {
       r = await ask(false);
     }
     dispatchCaption({ type: "interpreted", interpreted: r.interpreted });
-    const mode = r.interpreted?.mode ?? (st.mode === "auto" ? "describe" : st.mode);
+    const mode = r.interpreted?.mode ?? concreteMode(st.mode);
     const language = r.interpreted?.language ?? st.language;
     const next: Shot = {
       id: nextId.current++,
@@ -1309,7 +1316,9 @@ function Main() {
     if (m === settings.mode) return;
     haptic.tick();
     update({ mode: m });
-    if (live.current.screenReader) AccessibilityInfo.announceForAccessibility(`${STRIP_LABELS[m]} mode`);
+    if (live.current.screenReader) {
+      AccessibilityInfo.announceForAccessibility(m === "barcode" ? "Barcode mode. Point at a barcode." : `${STRIP_LABELS[m]} mode`);
+    } else if (m === "barcode") speech.hint("Point at a barcode");
   };
 
   // Swipe left/right on the viewfinder to change mode (iOS Camera); a plain tap captures.
@@ -1461,6 +1470,17 @@ function Main() {
             </View>
           </View>
 
+          {mode === "barcode" ? (
+            <View style={s.aimWrap} pointerEvents="none">
+              <View style={s.aimFrame} />
+              <Frost dark style={s.statusPill}>
+                <Text style={[s.statusText, { fontSize: 17 }]} accessibilityLabel="Point at a barcode">
+                  Point at a barcode
+                </Text>
+              </Frost>
+            </View>
+          ) : null}
+
           {/* Upper third: captions, hints, server status */}
           <View style={[s.caption, { top: insets.top + 70 }]} pointerEvents="box-none">
             {caption.phase === "listening" ? (
@@ -1572,7 +1592,8 @@ function Main() {
                 onPress={capture}
                 busy={busy}
                 disabled={!camGranted}
-                label={busy ? "Looking" : `Capture, ${STRIP_LABELS[mode]} mode`}
+                label={busy ? "Looking" : mode === "barcode" ? "Read the package" : `Capture, ${STRIP_LABELS[mode]} mode`}
+                glyph={mode === "barcode" ? <Icon sf="barcode" ion="barcode-outline" size={34} color={colors.label} /> : undefined}
               />
               {connection.features.transcribe !== false && (Platform.OS !== "web" || demo) ? (
                 <Pressable
@@ -1858,6 +1879,8 @@ const s = StyleSheet.create({
     justifyContent: "center",
   },
   camMicOn: { backgroundColor: "#FFFFFF" },
+  aimWrap: { position: "absolute", top: "30%", left: 0, right: 0, alignItems: "center", gap: 14 },
+  aimFrame: { width: 270, height: 150, borderRadius: 22, borderWidth: 4, borderColor: "#FFFFFF" },
   bookPill: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 56, paddingHorizontal: 22, borderRadius: 28 },
   captionPill: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 48, paddingHorizontal: 18, borderRadius: 24 },
   statusPill: { minHeight: 36, paddingHorizontal: 14, borderRadius: 18, justifyContent: "center" },

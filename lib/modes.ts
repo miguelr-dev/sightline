@@ -72,7 +72,14 @@ export const ITEM_KINDS = [
 export type ItemKind = (typeof ITEM_KINDS)[number];
 
 /** A titled block of extra information, shown on screen and read on request. */
-export type Section = { title: string; body: string };
+export type Section = {
+  title: string;
+  body: string;
+  provenance?: "label" | "web"; // read from the photo, or found online
+};
+
+/** A turn of the conversation about the current photo or page (the last 6 are sent). */
+export type ConversationTurn = { question: string; answer: string };
 
 export type AnalyzeResponse = {
   spokenText: string; // the gist, about 30 words; recalls, warnings and allergens always kept
@@ -81,6 +88,7 @@ export type AnalyzeResponse = {
   webQuery?: string; // short search query for a web lookup, empty when nothing is identifiable
   itemKind?: ItemKind;
   mode?: Mode; // the mode the answer was made in (what "auto" chose)
+  page?: import("./book").BookPage; // book mode: the exact page text, sentences and signature
   scanId?: string; // history entry for this scan (only with an x-sightline-device header)
   cached?: boolean; // true when this exact photo and request were answered before
   utterance?: string; // the request's utterance, echoed back (trimmed, max 300 chars)
