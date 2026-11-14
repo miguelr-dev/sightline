@@ -20,6 +20,97 @@ const UNITS: Unit[] = [
 
 const NUM = "(\\d+(?:[.,]\\d+)?)";
 
+// ---- numbers → words (ElevenLabs' fast model mispronounces bare digits: "10" as "tee ten") ----
+
+const ONES = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
+const TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const ORDINAL_FIX: Record<string, string> = { one: "first", two: "second", three: "third", five: "fifth", eight: "eighth", nine: "ninth", twelve: "twelfth" };
+
+function under100(n: number): string {
+  if (n < 20) return ONES[n];
+  return TENS[Math.floor(n / 10)] + (n % 10 ? `-${ONES[n % 10]}` : "");
+}
+
+function under1000(n: number): string {
+  const h = Math.floor(n / 100);
+  const r = n % 100;
+  return [h ? `${ONES[h]} hundred` : "", r || !h ? under100(r) : ""].filter(Boolean).join(" ");
+}
+
+/** Whole numbers up to the billions, as words. */
+export function cardinal(n: number): string {
+  if (n === 0) return "zero";
+  const parts: string[] = [];
+  for (const [size, name] of [[1e9, "billion"], [1e6, "million"], [1e3, "thousand"]] as const) {
+    if (n >= size) {
+      parts.push(`${under1000(Math.floor(n / size))} ${name}`);
+      n %= size;
+    }
+  }
+  if (n) parts.push(under1000(n));
+  return parts.join(" ");
+}
+
+function ordinal(n: number): string {
+  const words = cardinal(n);
+  const m = words.match(/(\w+)$/);
+  if (!m) return words;
+  const last = m[1];
+  const fixed = ORDINAL_FIX[last] ?? (last.endsWith("y") ? `${last.slice(0, -1)}ieth` : `${last}th`);
+  return words.slice(0, -last.length) + fixed;
+}
+
+function year(n: number): string {
+  const hi = Math.floor(n / 100);
+  const lo = n % 100;
+  if (lo === 0) return `${under100(hi)} hundred`;
+  return `${under100(hi)} ${lo < 10 ? `oh ${ONES[lo]}` : under100(lo)}`;
+}
+
+const digits = (s: string) => s.split("").map((d) => ONES[Number(d)]).join(" ");
+const int = (s: string) => Number(s.replace(/,/g, ""));
+const B = "(?<![A-Za-z0-9.,/$:])"; // not glued to a word, code or another number
+const E = "(?![A-Za-z0-9])";
+
+function money(whole: string, cents?: string): string {
+  const d = int(whole);
+  const c = cents ? Number(cents) : 0;
+  const dollars = `${cardinal(d)} ${d === 1 ? "dollar" : "dollars"}`;
+  return c ? `${dollars} and ${cardinal(c)} ${c === 1 ? "cent" : "cents"}` : dollars;
+}
+
+export function speakNumbers(text: string, lang = "en-US"): string {
+  if (!lang.toLowerCase().startsWith("en")) return text;
+  let out = text;
+  // Ordinals: 1st, 22nd.
+  out = out.replace(new RegExp(`${B}(\\d{1,3})(st|nd|rd|th)${E}`, "g"), (_m, n: string) => ordinal(Number(n)));
+  // Money: $12.76, $5, "7.50 dollars".
+  out = out.replace(/\$(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{2}))?(?![\d])/g, (_m, w: string, c?: string) => money(w, c));
+  out = out.replace(new RegExp(`${B}(\\d+)\\.(\\d{2}) dollars${E}`, "g"), (_m, w: string, c: string) => money(w, c));
+  // Month/year: 08/2027.
+  out = out.replace(new RegExp(`${B}(0?[1-9]|1[0-2])/((?:19|20)\\d{2})${E}`, "g"), (_m, m: string, y: string) => `${MONTHS[Number(m) - 1]} ${year(Number(y))}`);
+  // Clock times: 11:30, 9:05, 11:00.
+  out = out.replace(new RegExp(`${B}([01]?\\d|2[0-3]):([0-5]\\d)${E}`, "g"), (_m, h: string, mm: string) => {
+    const mins = Number(mm);
+    return `${cardinal(Number(h))} ${mins === 0 ? "o'clock" : mins < 10 ? `oh ${ONES[mins]}` : under100(mins)}`;
+  });
+  // Long codes (barcodes, phone numbers): digit by digit.
+  out = out.replace(new RegExp(`${B}(\\d{7,})${E}`, "g"), (_m, d: string) => digits(d));
+  // Decimals: 8.4 → eight point four.
+  out = out.replace(new RegExp(`${B}(\\d+)\\.(\\d+)${E}`, "g"), (_m, w: string, f: string) => `${cardinal(Number(w))} point ${digits(f)}`);
+  // Years on their own: 2026 → twenty twenty-six.
+  out = out.replace(new RegExp(`${B}((?:19|20)\\d{2})${E}(?!\\s?(?:grams|gram|milligrams|calories|ounces|fluid|milliliters|people|mg|g\\b))`, "g"), (_m, y: string) => year(Number(y)));
+  // Everything else: whole numbers, with or without thousands commas.
+  out = out.replace(new RegExp(`${B}(\\d{1,3}(?:,\\d{3})+|\\d+)${E}`, "g"), (_m, n: string) => cardinal(int(n)));
+  return out;
+}
+
+/** Everything the voice needs: units spelled out, then numbers as words. */
+export function speakable(text: string, lang = "en-US"): string {
+  return speakNumbers(speakableUnits(text, lang), lang);
+}
+
 export function speakableUnits(text: string, lang = "en-US"): string {
   if (!lang.toLowerCase().startsWith("en")) return text;
   let out = text;

@@ -1,5 +1,5 @@
 import { ELEVENLABS_API, elevenKey, ttsModel, voiceId } from "@/lib/elevenlabs";
-import { speakableUnits } from "@/lib/speechText";
+import { speakable } from "@/lib/speechText";
 import { readJson } from "@/lib/http";
 
 // ElevenLabs text-to-speech. The client sends one sentence-sized chunk at a time
@@ -53,10 +53,10 @@ export async function POST(request: Request) {
 
   const lang = str(input.lang, 20) || "en-US";
   // Spell out "0g" / "80mg" / "fl oz" so the voice doesn't say "zero gee".
-  const text = speakableUnits(str(input.text, MAX_TEXT), lang);
+  const text = speakable(str(input.text, MAX_TEXT), lang);
   if (!text) return fail("no-text", 400);
-  const previousText = speakableUnits(str(input.previousText, MAX_CONTEXT), lang);
-  const nextText = speakableUnits(str(input.nextText, MAX_CONTEXT), lang);
+  const previousText = speakable(str(input.previousText, MAX_CONTEXT), lang);
+  const nextText = speakable(str(input.nextText, MAX_CONTEXT), lang);
   const requested = typeof input.voiceId === "string" ? input.voiceId.trim() : "";
   const voice = VOICE_ID.test(requested) ? requested : voiceId();
 

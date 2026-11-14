@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { speakableUnits } from "@/lib/speechText";
+import { speakable, speakableUnits, speakNumbers } from "@/lib/speechText";
 
 describe("speakableUnits: spell out units for the voice only", () => {
   it.each([
@@ -30,6 +30,34 @@ describe("speakableUnits: spell out units for the voice only", () => {
     expect(speakableUnits("Go to Gate 5 for the bus", "en-US")).toBe("Go to Gate 5 for the bus");
     expect(speakableUnits("Lemon sorbet, vegan and gluten free", "en-US")).toBe("Lemon sorbet, vegan and gluten free");
     expect(speakableUnits("Highway 5 is closed", "en-US")).toBe("Highway 5 is closed");
+  });
+
+  it.each([
+    ["10", "ten"],
+    ["Serves 2", "Serves two"],
+    ["Total 21", "Total twenty-one"],
+    ["135 calories", "one hundred thirty-five calories"],
+    ["1,250 people", "one thousand two hundred fifty people"],
+    ["8.4", "eight point four"],
+    ["0.5", "zero point five"],
+    ["7.50 dollars", "seven dollars and fifty cents"],
+    ["24 dollars", "twenty-four dollars"],
+    ["$12.76", "twelve dollars and seventy-six cents"],
+    ["$5", "five dollars"],
+    ["expires 08/2027", "expires August twenty twenty-seven"],
+    ["In 2026", "In twenty twenty-six"],
+    ["11:30", "eleven thirty"],
+    ["9:05", "nine oh five"],
+    ["UPC 196633831439", "UPC one nine six six three three eight three one four three nine"],
+    ["Lot 24C117", "Lot 24C117"],
+    ["1st and 2nd", "first and second"],
+  ])("number %s → %s", (input, expected) => {
+    expect(speakNumbers(input, "en-US")).toBe(expected);
+  });
+
+  it("does units and numbers together for the voice", () => {
+    expect(speakable("Fat 0g, Sodium 105mg, 12 fl oz", "en-US")).toBe("Fat zero grams, Sodium one hundred five milligrams, twelve fluid ounces");
+    expect(speakable("Protein 1g", "en-US")).toBe("Protein one gram");
   });
 
   it("only rewrites English, so other languages keep their own unit reading", () => {
