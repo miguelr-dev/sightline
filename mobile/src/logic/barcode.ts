@@ -33,8 +33,12 @@ function upcEToA(e: string): string {
 
 /** The code's digits if it's a valid retail barcode, else null (a misread or partial code). */
 export function normalizeBarcode(type: string, data: string): string | null {
-  const kind = TYPES[type];
-  if (!kind || !/^\d+$/.test(data) || data.length !== LENGTH[kind]) return null;
+  let kind = TYPES[type];
+  if (!kind || !/^\d+$/.test(data)) return null;
+  // expo-camera on iOS reports UPC-A as ean13 with the leading 0 stripped, so a 12-digit "ean13"
+  // is really a UPC-A code (every US product barcode).
+  if (kind === "ean13" && data.length === 12) kind = "upc_a";
+  if (data.length !== LENGTH[kind]) return null;
   return gtinValid(kind === "upc_e" ? upcEToA(data) : data) ? data : null;
 }
 

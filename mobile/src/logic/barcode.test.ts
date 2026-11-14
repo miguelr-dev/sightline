@@ -18,6 +18,12 @@ describe("normalizeBarcode", () => {
   it("accepts iOS's org.gs1 type names", () => {
     expect(normalizeBarcode("org.gs1.EAN-13", "5449000000996")).toBe("5449000000996");
   });
+  it("accepts US UPC-A codes that iOS reports as ean13 with the leading zero stripped (12 digits)", () => {
+    // expo-camera iOS: UPC-A comes back as type ean13 and the 13-digit value minus its leading 0.
+    expect(normalizeBarcode("ean13", "049000028911")).toBe("049000028911"); // Diet Coke
+    expect(normalizeBarcode("org.gs1.EAN-13", "044000032029")).toBe("044000032029"); // Oreo
+    expect(normalizeBarcode("ean13", "049000028912")).toBeNull(); // still checks the check digit
+  });
 });
 
 const COKE = "5449000000996";
