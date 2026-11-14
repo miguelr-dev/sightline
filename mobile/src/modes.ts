@@ -95,6 +95,7 @@ export type FrameCheck = {
   label?: string; // e.g. "Menu" or "Nutter Butter cookies"
   suggestedMode?: string; // validated against MODES by the caller
   confidence?: number; // 0..1
+  box?: { x: number; y: number; w: number; h: number }; // the target, normalized 0–1 to the frame sent
 };
 
 export type Voice = { id: string; name: string; description?: string; previewUrl?: string };

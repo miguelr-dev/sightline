@@ -12,7 +12,7 @@ import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, Alert, AppState, Linking, PanResponder, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { AccessibilityInfo, Alert, AppState, Linking, PanResponder, useWindowDimensions, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   analyze,
@@ -60,8 +60,12 @@ import { HatView } from "./src/components/HatView";
 import { useAutoCapture, type AutoDebug, type Detection } from "./src/useAutoCapture";
 import { useHatCamera } from "./src/useHatCamera";
 import { averageLuma, isTooDark } from "./src/logic/brightness";
+import { hintDelivery } from "./src/logic/hints";
+import { bracketVisible, cornersToRect, normBoxToView, type Rect } from "./src/logic/brackets";
+import { Brackets } from "./src/components/Brackets";
 import { lookupLanguage } from "./src/logic/lookupRequest";
 import { conversationFrom, trimConversation, type Turn } from "./src/logic/conversation";
+import { activeChip, pinchZoom, zoomForFactor, ZOOM_CHIPS } from "./src/logic/zoom";
 import { initialBook, reduceBook, sentenceOwner, type BookEvent, type BookPage, type BookState } from "./src/logic/book";
 import { BookView } from "./src/components/BookView";
 import { useTurnDetector } from "./src/useTurnDetector";
@@ -107,7 +111,11 @@ async function toJpeg(uri: string, width: number, height: number, maxSide = MAX_
 }
 
 // Auto-mode frame: 512 px JPEG for the server plus a 16 px PNG to measure brightness locally.
-async function toFrame(uri: string, width: number, height: number): Promise<{ image: string } | { dark: true; luma: number }> {
+async function toFrame(
+  uri: string,
+  width: number,
+  height: number,
+): Promise<{ image: string; w: number; h: number } | { dark: true; luma: number }> {
   const ctx = ImageManipulator.manipulate(uri);
   if (Math.max(width, height) > FRAME_SIDE) ctx.resize(width >= height ? { width: FRAME_SIDE } : { height: FRAME_SIDE });
   const img = await ctx.renderAsync();
@@ -121,7 +129,7 @@ async function toFrame(uri: string, width: number, height: number): Promise<{ im
   } catch {
     // Can't measure: send it anyway.
   }
-  return { image: out.base64 };
+  return { image: out.base64, w: out.width, h: out.height };
 }
 
 // One camera operation at a time: auto frames and manual captures never overlap.
@@ -173,6 +181,14 @@ function Main() {
   const [screenReader, setScreenReader] = useState(false);
   const [appActive, setAppActive] = useState(AppState.currentState === "active");
   const cameraStartedAt = useRef(0);
+  const win = useWindowDimensions();
+  // Live-Text-style brackets: the last target box in view points, and when it was seen.
+  const [detectBox, setDetectBox] = useState<{ rect: Rect; at: number } | null>(demo?.detectBox ?? null);
+  const [barcodeBox, setBarcodeBox] = useState<{ rect: Rect; at: number } | null>(demo?.barcodeBox ?? null);
+  const [, setBracketTick] = useState(0);
+  const [zoom, setZoom] = useState(demo?.zoom ?? 0); // CameraView zoom 0–1 (see logic/zoom.ts)
+  const zoomRef = useRef(0);
+  zoomRef.current = zoom;
   const [cameraReady, setCameraReady] = useState(false);
   const [hint, setHint] = useState<string | null>(demo?.hint ?? null);
   const [detection, setDetection] = useState<Detection | null>(demo?.detection ?? null);
@@ -284,7 +300,10 @@ function Main() {
   useEffect(() => {
     const sub = AppState.addEventListener("change", (st) => {
       setAppActive(st === "active");
-      if (st !== "active") silence();
+      if (st !== "active") {
+        silence();
+        setZoom(0); // back to 1× when the app is backgrounded
+      }
     });
     return () => sub.remove();
   }, [silence]);
@@ -475,13 +494,14 @@ function Main() {
     },
     // Auto never reads by itself: it only offers the card. Reading starts when the user taps it.
     onDetect: (d, appeared) => showDetection(d, false, 2000, appeared),
+    onBox: (box, frame) =>
+      setDetectBox(box ? { rect: normBoxToView(box, { w: win.width, h: win.height }, frame), at: Date.now() } : null),
     onDebug: showDebug ? setDebug : undefined,
     onHint: (text) => {
       if (busyRef.current || sheetRef.current !== "none") return; // never over a result
       setHint(text);
-      const { settings: s, screenReader: sr } = live.current;
-      if (s.autoSpeak) speech.hint(text);
-      else if (sr) AccessibilityInfo.announceForAccessibility(text);
+      // Hints are shown, and announced to VoiceOver; never spoken aloud (nothing talks unless asked).
+      if (hintDelivery({ screenReader: live.current.screenReader }).announce) AccessibilityInfo.announceForAccessibility(text);
     },
     onUnavailable: () => update({ autoCapture: false, autoOffByServer: true }), // older server: off, quietly
   });
@@ -531,6 +551,14 @@ function Main() {
     void start(capturePhoto(true), strip === "auto" ? { suggested: d.mode, key: d.key } : { mode: d.mode ?? undefined, key: d.key });
   };
 
+  // ---- brackets ------------------------------------------------------------------------------------
+  const showBrackets = !hat && !bookActive && sheet === "none" && camGranted;
+  useEffect(() => {
+    if (!showBrackets || (!detectBox && !barcodeBox)) return;
+    const t = setInterval(() => setBracketTick((n) => n + 1), 250); // re-check age and steadiness
+    return () => clearInterval(t);
+  }, [showBrackets, !!detectBox, !!barcodeBox]);
+
   // ---- barcodes ------------------------------------------------------------------------------------
   // On-device scanning in every mode but Translate. A code seen twice within 500 ms is looked up
   // and offered as a card; nothing is spoken until the user taps it. Logic: logic/barcode.ts.
@@ -567,7 +595,11 @@ function Main() {
     }
   }
 
-  const onBarcode = (r: { type: string; data: string }) => {
+  const onBarcode = (r: { type: string; data: string; cornerPoints?: { x: number; y: number }[]; bounds?: { origin: { x: number; y: number }; size: { width: number; height: number } } }) => {
+    const rect =
+      cornersToRect(r.cornerPoints ?? []) ??
+      (r.bounds && r.bounds.size.width > 0 ? { x: r.bounds.origin.x, y: r.bounds.origin.y, w: r.bounds.size.width, h: r.bounds.size.height } : null);
+    if (rect) setBarcodeBox({ rect, at: Date.now() });
     const code = normalizeBarcode(r.type, r.data);
     dispatchBarcode(code ? { type: "seen", code, at: Date.now() } : { type: "partial", at: Date.now() });
   };
@@ -621,6 +653,7 @@ function Main() {
 
   // Whenever a sheet closes, Auto resumes at once and may offer the same item again (rescan).
   useEffect(() => {
+    if (sheet !== "none") dispatchBarcode({ type: "sheetOpened" }); // the card never outlives a sheet
     if (sheet === "none") {
       auto.resume();
       // In BARCODE mode the product is usually still in view: wait a moment before reopening it.
@@ -713,9 +746,7 @@ function Main() {
       // Same hint for 3 s, at most every 5 s, never over a result or other speech.
       if (t - h.since >= 3000 && t - h.lastSpoken >= 5000 && sheetRef.current === "none" && !speech.owner && !speakingRef.current) {
         h.lastSpoken = t;
-        const { settings: st, screenReader: sr } = live.current;
-        if (st.autoSpeak) speech.hint(text);
-        else if (sr) AccessibilityInfo.announceForAccessibility(text);
+        if (hintDelivery({ screenReader: live.current.screenReader }).announce) AccessibilityInfo.announceForAccessibility(text);
       }
       return;
     }
@@ -772,7 +803,7 @@ function Main() {
   };
 
   const hatCam = useHatCamera({
-    enabled: hat && !demo,
+    enabled: hat && !demo && appActive, // no polling (or backlog replay) while backgrounded
     hardwareId: settings.hatDeviceId.trim(),
     pairCode: settings.hatPairCode.trim(),
     onEvent: onHatEvent,
@@ -879,7 +910,10 @@ function Main() {
     say(answer.spokenText, speakLang(s), { token });
   };
 
-  const stopRecording = async () => {
+  /** cancel: the user left (Done, swipe, another sheet): stop recording and drop the question. */
+  const stopRecording = async (cancel = false) => {
+    // Take the token before any await, so closing the sheet meanwhile cancels the answer.
+    const token = speakToken.current;
     if (recordTimer.current) clearTimeout(recordTimer.current);
     recordTimer.current = null;
     setRecording(false);
@@ -888,8 +922,8 @@ function Main() {
     } catch {}
     // Leave record mode, or iOS keeps playback on the quiet earpiece.
     await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+    if (cancel || token !== speakToken.current) return;
     const uri = recorder.uri;
-    const token = speakToken.current;
     if (!uri) return say("I didn't catch that. Please try again.", "en-US", { token });
     setTranscribing(true);
     const { text, status: code } = await transcribe(uri);
@@ -1308,7 +1342,7 @@ function Main() {
   };
 
   const closeResult = () => {
-    if (recording) void stopRecording();
+    if (recording) void stopRecording(true);
     setSheet("none");
   };
 
@@ -1324,10 +1358,30 @@ function Main() {
   // Swipe left/right on the viewfinder to change mode (iOS Camera); a plain tap captures.
   const swipe = useRef({ change: changeMode, capture: () => {}, mode: settings.mode });
   swipe.current = { change: changeMode, capture: () => void capture(), mode: settings.mode };
+  // Two fingers pinch-zoom the camera; a pinch never counts as a swipe or a tap.
+  const pinch = useRef({ active: false, startDist: 0, startZoom: 0 });
   const modeSwipe = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        pinch.current.active = false;
+        pinch.current.startDist = 0;
+      },
+      onPanResponderMove: (e) => {
+        const t = e.nativeEvent.touches;
+        if (t.length < 2) return;
+        const d = Math.hypot(t[0].pageX - t[1].pageX, t[0].pageY - t[1].pageY);
+        if (!pinch.current.startDist) {
+          pinch.current = { active: true, startDist: d, startZoom: zoomRef.current };
+          return;
+        }
+        setZoom(pinchZoom(pinch.current.startZoom, d / pinch.current.startDist));
+      },
       onPanResponderRelease: (_e, g) => {
+        if (pinch.current.active) {
+          pinch.current.active = false;
+          return;
+        }
         const { change, capture: snap, mode: cur } = swipe.current;
         if (Math.abs(g.dx) > 50 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5) {
           const i = STRIP_MODES.indexOf(cur) + (g.dx < 0 ? 1 : -1);
@@ -1370,7 +1424,7 @@ function Main() {
           commandsOn={hatCommandsOn}
           recording={recording && voiceTarget.current === "hat"}
           transcribing={transcribing && voiceTarget.current === "hat"}
-          asking={demo?.hatAsking ?? (cmd.current ? cmd.current.text : null)}
+          asking={demo?.hatAsking ?? (cmd.current && cmd.current.phase !== "status" ? cmd.current.text : null)}
           onTalk={() => void toggleMic("hat")}
           onType={(text) => void submitHatInput(text, "typed")}
         />
@@ -1380,7 +1434,11 @@ function Main() {
       {!hat ? (
         <View style={StyleSheet.absoluteFill} {...modeSwipe.panHandlers}>
           {demo ? (
-            <Image source={demo.photo} style={StyleSheet.absoluteFill} contentFit="cover" />
+            <Image
+              source={demo.photo}
+              style={[StyleSheet.absoluteFill, { transform: [{ scale: Math.pow(16, zoom) }] }]}
+              contentFit="cover"
+            />
           ) : camGranted ? (
             <CameraView
               ref={camera}
@@ -1390,6 +1448,7 @@ function Main() {
               animateShutter={false}
               flash="off"
               onCameraReady={onCameraReady}
+              zoom={zoom}
               barcodeScannerSettings={{ barcodeTypes: ["ean13", "ean8", "upc_a", "upc_e"] }}
               onBarcodeScanned={barcodeOn ? onBarcode : undefined}
             />
@@ -1470,9 +1529,23 @@ function Main() {
             </View>
           </View>
 
+          {(() => {
+            if (!showBrackets) return null;
+            const now = Date.now();
+            const steady = demo ? true : auto.isSteady();
+            const barcodeFresh = barcodeBox && bracketVisible({ steady: true, hasTarget: true, ageMs: now - barcodeBox.at, kind: "barcode" });
+            if (mode === "barcode") {
+              // The aiming frame is the brackets; they lock onto the barcode when it's found.
+              const aim = { x: (win.width - 270) / 2, y: win.height * 0.3, w: 270, h: 150 };
+              return <Brackets rect={barcodeFresh ? barcodeBox!.rect : aim} visible reduceMotion={reduceMotion} />;
+            }
+            if (barcodeFresh) return <Brackets rect={barcodeBox!.rect} visible reduceMotion={reduceMotion} />;
+            const d = detectBox && detection;
+            const vis = !!d && bracketVisible({ steady, hasTarget: true, ageMs: now - detectBox!.at, kind: "detect" });
+            return <Brackets rect={detectBox?.rect ?? null} visible={vis} reduceMotion={reduceMotion} />;
+          })()}
           {mode === "barcode" ? (
-            <View style={s.aimWrap} pointerEvents="none">
-              <View style={s.aimFrame} />
+            <View style={[s.aimWrap, { top: win.height * 0.3 + 168 }]} pointerEvents="none">
               <Frost dark style={s.statusPill}>
                 <Text style={[s.statusText, { fontSize: 17 }]} accessibilityLabel="Point at a barcode">
                   Point at a barcode
@@ -1575,6 +1648,29 @@ function Main() {
                 </Frost>
               </Pressable>
             ) : null}
+            <View style={s.zoomRow} accessibilityLabel="Zoom">
+              {ZOOM_CHIPS.map((c) => {
+                const on = activeChip(zoom) === c;
+                return (
+                  <Pressable
+                    key={c}
+                    onPress={() => {
+                      haptic.tick();
+                      setZoom(zoomForFactor(c));
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Zoom ${c} times`}
+                    accessibilityState={{ selected: on }}
+                    hitSlop={4}
+                    style={[s.zoomChip, on && s.zoomChipOn]}
+                  >
+                    <Text style={[s.zoomText, on && s.zoomTextOn]} maxFontSizeMultiplier={1.4}>
+                      {c}×
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
             <ModeStrip mode={mode} onChange={changeMode} language={settings.language} onLanguage={() => setSheet("language")} />
             <View style={s.camRow}>
               <LastThumb
@@ -1742,7 +1838,10 @@ function Main() {
         loading={scansLoading}
         reduceMotion={reduceMotion}
         onOpen={openScan}
-        onClose={() => setSheet("none")}
+        onClose={() => {
+          if (recording) void stopRecording(true);
+          setSheet("none");
+        }}
       />
       <LanguageSheet
         visible={sheet === "language"}
@@ -1879,8 +1978,12 @@ const s = StyleSheet.create({
     justifyContent: "center",
   },
   camMicOn: { backgroundColor: "#FFFFFF" },
-  aimWrap: { position: "absolute", top: "30%", left: 0, right: 0, alignItems: "center", gap: 14 },
-  aimFrame: { width: 270, height: 150, borderRadius: 22, borderWidth: 4, borderColor: "#FFFFFF" },
+  aimWrap: { position: "absolute", left: 0, right: 0, alignItems: "center", gap: 14 },
+  zoomRow: { flexDirection: "row", alignSelf: "center", gap: 10, padding: 4, borderRadius: 30, backgroundColor: "rgba(0,0,0,0.35)" },
+  zoomChip: { minWidth: 52, height: 52, borderRadius: 26, alignItems: "center", justifyContent: "center", paddingHorizontal: 8 },
+  zoomChipOn: { backgroundColor: "#FFFFFF" },
+  zoomText: { color: "#FFFFFF", fontSize: 17, fontWeight: "700" },
+  zoomTextOn: { color: "#000000", fontWeight: "900" },
   bookPill: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 56, paddingHorizontal: 22, borderRadius: 28 },
   captionPill: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 48, paddingHorizontal: 18, borderRadius: 24 },
   statusPill: { minHeight: 36, paddingHorizontal: 14, borderRadius: 18, justifyContent: "center" },

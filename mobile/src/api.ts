@@ -231,6 +231,7 @@ export async function frameCheck(req: {
       suggestedMode: typeof r.data.suggestedMode === "string" ? r.data.suggestedMode : undefined,
       confidence:
         typeof r.data.confidence === "number" && Number.isFinite(r.data.confidence) ? r.data.confidence : undefined,
+      box: validBox(r.data.box),
     },
   };
 }
@@ -469,4 +470,12 @@ export async function lookupBarcode(code: string, language?: string): Promise<Ba
   } finally {
     clearTimeout(timer);
   }
+}
+
+function validBox(b: unknown): { x: number; y: number; w: number; h: number } | undefined {
+  if (!b || typeof b !== "object") return undefined;
+  const { x, y, w, h } = b as Record<string, unknown>;
+  if (![x, y, w, h].every((v) => typeof v === "number" && Number.isFinite(v))) return undefined;
+  if ((w as number) <= 0 || (h as number) <= 0) return undefined;
+  return { x: x as number, y: y as number, w: w as number, h: h as number };
 }

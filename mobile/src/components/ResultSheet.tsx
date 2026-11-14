@@ -23,6 +23,7 @@ import { RATES } from "../settings";
 import { colors, MIN_TARGET, radius, type } from "../theme";
 import type { Shot } from "../types";
 import { SectionList } from "./Disclosure";
+import { Magnifier } from "./Magnifier";
 import { Segmented } from "./Segmented";
 import { Icon, IconButton, PillButton } from "./ui";
 
@@ -68,6 +69,7 @@ export function ResultSheet(p: Props) {
   const lang = shot?.mode === "translate" ? languageCode(shot.language) : "en-US";
 
   // Read all: every section (answer, then web) in order, one owner per section.
+  const [magnify, setMagnify] = useState(false);
   const [readAll, setReadAllState] = useState<ReadAllState>(initialReadAll);
   const readAllRef = useRef<ReadAllState>(initialReadAll);
   const setReadAll = (st: ReadAllState) => {
@@ -122,6 +124,7 @@ export function ResultSheet(p: Props) {
           </Pressable>
         </View>
 
+        <Magnifier uri={shot?.photo?.uri ?? null} visible={magnify} reduceMotion={p.reduceMotion} onClose={() => setMagnify(false)} />
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <ScrollView
             contentContainerStyle={[s.content, { paddingBottom: insets.bottom + 32 }]}
@@ -143,15 +146,23 @@ export function ResultSheet(p: Props) {
               </Text>
             ) : null}
             {shot?.photo ? (
-              <Image
-                source={{ uri: shot.photo.uri }}
-                style={[s.photo, { aspectRatio: ratio }]}
-                contentFit="cover"
-                transition={p.reduceMotion ? 0 : 180}
-                accessible
-                accessibilityLabel={shot.fromHistory ? "Photo of the item" : "Your photo"}
-                accessibilityIgnoresInvertColors
-              />
+              <Pressable
+                onPress={() => setMagnify(true)}
+                accessibilityRole="button"
+                accessibilityLabel={`${shot.fromHistory ? "Photo of the item" : "Photo"}. Double-tap to magnify.`}
+              >
+                <Image
+                  source={{ uri: shot.photo.uri }}
+                  style={[s.photo, { aspectRatio: ratio }]}
+                  contentFit="cover"
+                  transition={p.reduceMotion ? 0 : 180}
+                  accessible={false}
+                  accessibilityIgnoresInvertColors
+                />
+                <View style={s.magnifyBadge} pointerEvents="none">
+                  <Icon sf="plus.magnifyingglass" ion="search" size={18} color="#FFFFFF" />
+                </View>
+              </Pressable>
             ) : shot?.fromHistory ? null : (
               <View style={[s.photo, { aspectRatio: ratio, backgroundColor: colors.surface }]} />
             )}
@@ -464,6 +475,17 @@ const s = StyleSheet.create({
   done: { minHeight: MIN_TARGET, minWidth: MIN_TARGET, paddingHorizontal: 12, justifyContent: "center", alignItems: "center" },
   content: { paddingHorizontal: 20, paddingTop: 4, gap: 20 },
   photo: { width: "100%", borderRadius: radius.card, backgroundColor: colors.surface },
+  magnifyBadge: {
+    position: "absolute",
+    right: 12,
+    bottom: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   thread: { gap: 10, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.hairline },
   asked: { fontSize: 24, lineHeight: 31, fontWeight: "600", letterSpacing: -0.3, color: colors.label },
   looking: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 8 },
