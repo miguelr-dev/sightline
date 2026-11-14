@@ -28,6 +28,7 @@ const STATUS_TEXT: Record<HatStatus, string> = {
   missing: "Hat camera isn't set up on this server yet.",
   unauthorized: "The pair code was rejected. Check it in Settings.",
   invalid: "That device ID isn't valid. Check it in Settings.",
+  elsewhere: "Your hat is connected to another phone.",
   offline: "Can't reach the server. Retrying.",
 };
 

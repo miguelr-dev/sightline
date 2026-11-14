@@ -26,6 +26,7 @@ import {
   lookup,
   parseDeviceAnswer,
   sendHatCommand,
+  unpairHat,
   setBaseUrl,
   setDeviceId,
   transcribe,
@@ -56,6 +57,7 @@ import { HatView } from "./src/components/HatView";
 import { useAutoCapture, type AutoDebug, type Detection } from "./src/useAutoCapture";
 import { useHatCamera } from "./src/useHatCamera";
 import { averageLuma, isTooDark } from "./src/logic/brightness";
+import { lookupLanguage } from "./src/logic/lookupRequest";
 import {
   buildLookingRequest,
   fallbackFor,
@@ -305,6 +307,7 @@ function Main() {
         query,
         itemKind: r.itemKind,
         scanId: r.scanId,
+        language: lookupLanguage(s.mode, s.language),
         context: { mode: s.mode, spokenText: r.spokenText, details: r.details },
       });
       clearTimeout(showLoading);
@@ -319,7 +322,8 @@ function Main() {
       patchShot(s.id, (x) => ({ ...x, web: { status: "done", data } }));
       if (token !== speakToken.current) return; // sheet closed meanwhile: show it, never speak it
       if (!data.error) haptic.success();
-      say(data.spokenText, "en-US", { queue: auto, token });
+      const webLang = lookupLanguage(s.mode, s.language) ? languageCode(s.language) : "en-US";
+      say(data.spokenText, webLang, { queue: auto, token });
     },
     [say],
   );
@@ -628,6 +632,8 @@ function Main() {
     silence();
     showDetection(null, true);
     setHint(null);
+    const { settings: st } = live.current;
+    void unpairHat(st.hatDeviceId.trim(), st.hatPairCode.trim()); // so another phone can pair at once
     update({ hatConnected: false });
     if (live.current.screenReader) AccessibilityInfo.announceForAccessibility("Hat camera disconnected");
   };

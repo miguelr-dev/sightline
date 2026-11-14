@@ -10,7 +10,8 @@ const POLL_MS = 700;
 const MISSING_POLL_MS = 5000; // route missing or server down: keep trying, slowly
 const FRESH_MS = 8000;
 
-export type HatStatus = "connecting" | "live" | "missing" | "unauthorized" | "invalid" | "offline";
+import { hatStatusFor, type HatStatus } from "./logic/hatStatus";
+export type { HatStatus } from "./logic/hatStatus";
 
 export function useHatCamera({
   enabled,
@@ -39,7 +40,7 @@ export function useHatCamera({
     setLastEventAt(null);
 
     const poll = async () => {
-      const { status: code, events } = await deviceNext(hardwareId, pairCode, after);
+      const { status: code, events, reason } = await deviceNext(hardwareId, pairCode, after);
       if (cancelled) return;
       setLastPollAt(Date.now());
       let wait = POLL_MS;
@@ -64,18 +65,10 @@ export function useHatCamera({
           }
         }
         primed = true;
-      } else if (code === 400) {
-        setStatus("invalid");
-        wait = MISSING_POLL_MS;
-      } else if (code === 404 || code === 405 || code === 503) {
-        setStatus("missing");
-        wait = MISSING_POLL_MS;
-      } else if (code === 401 || code === 403) {
-        setStatus("unauthorized");
-        wait = MISSING_POLL_MS;
       } else {
-        setStatus("offline");
-        wait = 2000;
+        const st = hatStatusFor(code, { reason });
+        setStatus(st);
+        wait = st === "offline" ? 2000 : MISSING_POLL_MS;
       }
       timer = setTimeout(() => void poll(), wait);
     };
