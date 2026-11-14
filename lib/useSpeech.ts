@@ -94,6 +94,8 @@ class SpeechEngine {
   private unlocked = false;
   private cache = new Map<string, string>();
   private eleven: boolean | null = null; // null = unknown, false = not configured on the server
+  private natural = true; // Settings > Natural voice; off uses the browser's own voice
+  private voiceId = ""; // Settings > Voice; "" = the server's default voice
   private failures = 0;
   private cooldownUntil = 0;
 
@@ -138,6 +140,16 @@ class SpeechEngine {
     this.eleven = available;
   }
 
+  /** Settings > Natural voice. Off: the browser voice only (free, works offline). */
+  setNatural(natural: boolean) {
+    this.natural = natural;
+  }
+
+  /** Settings > Voice. "" = the server's default voice. */
+  setVoice(voiceId: string) {
+    this.voiceId = voiceId;
+  }
+
   setRate(rate: number) {
     this.rate = rate;
     if (this.audio && !this.audio.paused) this.audio.playbackRate = rate;
@@ -145,6 +157,7 @@ class SpeechEngine {
 
   private elevenUsable(): boolean {
     return (
+      this.natural &&
       this.eleven !== false &&
       Date.now() >= this.cooldownUntil &&
       typeof Audio !== "undefined" &&
@@ -166,7 +179,8 @@ class SpeechEngine {
 
   /** Fetch one chunk of ElevenLabs audio as an object URL, or null on any failure. */
   private async fetchClip(run: Run, text: string, lang: string, prev: string, next: string) {
-    const key = `${lang}|${text}`;
+    const voiceId = this.voiceId;
+    const key = `${voiceId}|${lang}|${text}`;
     const cached = this.cache.get(key);
     if (cached) return cached;
     const controller = new AbortController();
@@ -176,7 +190,7 @@ class SpeechEngine {
       const res = await fetch("/api/speak", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, lang, previousText: prev, nextText: next }),
+        body: JSON.stringify({ text, lang, previousText: prev, nextText: next, ...(voiceId ? { voiceId } : {}) }),
         signal: controller.signal,
       });
       if (res.status === 503) {
@@ -332,6 +346,24 @@ class SpeechEngine {
     void this.drain(run);
   }
 
+  /** Plays a ready-made audio file, such as a voice's sample in Settings. Stops anything speaking. */
+  playUrl(url: string) {
+    if (typeof window === "undefined") return;
+    this.halt();
+    let cancel = () => {};
+    const cancelled = new Promise<void>((r) => (cancel = r));
+    const run: Run = { id: ++this.runCounter, cancelled, cancel, controllers: new Set() };
+    this.run = run;
+    this.playing = true;
+    this.onSpeaking(true);
+    void this.playClip(run, url).then(() => {
+      if (!this.isCurrent(run)) return;
+      this.playing = false;
+      this.run = null;
+      this.onSpeaking(false);
+    });
+  }
+
   dispose() {
     this.halt();
     this.cache.forEach((url) => URL.revokeObjectURL(url));
@@ -368,5 +400,9 @@ export function useSpeech() {
     [engine],
   );
 
-  return { speaking, speak, stop, setRate, unlock, setElevenAvailable };
+  const setNatural = useCallback((natural: boolean) => engine.setNatural(natural), [engine]);
+  const setVoice = useCallback((voiceId: string) => engine.setVoice(voiceId), [engine]);
+  const playUrl = useCallback((url: string) => engine.playUrl(url), [engine]);
+
+  return { speaking, speak, stop, setRate, unlock, setElevenAvailable, setNatural, setVoice, playUrl };
 }
