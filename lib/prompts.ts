@@ -54,7 +54,13 @@ Work out whether the item is a menu, a product package, or a medicine or supplem
 - details: the full structured summary, for example every menu item with its price.`,
 
   translate: (language) => `Mode: Translate. Target language: ${language}.
-Read the visible text, work out what language it is in, and translate it into ${language}.
+First decide what the user is pointing the camera at.
+
+If there is a clear main item, translate only the text on that item and ignore text in the background. A clear item is something held in a hand, close to the camera, or centered and filling a good part of the frame: a sign, a menu, a package, a letter, a ticket, a screen. Do not translate other signs, posters, labels, or screens around or behind it. If part of the item's text is cut off, covered by a finger, or turned away, say which part and how to fix it, in ${language}.
+
+If there is no single main item, for example the camera shows a street with several signs or a storefront, translate all the visible text, most prominent first.
+
+Read the text, work out what language it is in, and translate it into ${language}.
 - spokenText: write it entirely in ${language}, because it will be read by a ${language} voice. Give the translation in natural reading order. If the text is already in ${language}, say so in ${language} and read it.
 - details: the source language name, the original text, then the translation.
 If there is no readable text, say so in ${language}.`,
