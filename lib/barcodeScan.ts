@@ -32,6 +32,8 @@ export function upcEToA(e: string): string {
 /** The digits to look up if this is a valid retail barcode, else null (a misread or partial code).
  *  UPC-E is expanded to UPC-A, which is what /api/barcode and the product databases expect. */
 export function normalizeBarcode(format: string, raw: string): string | null {
+  // Like the iPhone app: a 12-digit "EAN-13" is a UPC-A whose leading 0 was dropped.
+  if (format === "ean_13" && raw.length === 12) format = "upc_a";
   const len = LENGTH[format as keyof typeof LENGTH];
   if (!len || !/^\d+$/.test(raw) || raw.length !== len) return null;
   const code = format === "upc_e" ? upcEToA(raw) : raw;

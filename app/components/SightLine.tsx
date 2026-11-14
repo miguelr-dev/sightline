@@ -48,7 +48,7 @@ function zoomChips(z: number) {
 }
 
 type CameraState = "off" | "starting" | "on" | "unavailable";
-type Result = AnalyzeResponse & { mode: Mode; langCode: string; question?: string; barcode?: string };
+type Result = AnalyzeResponse & { mode: Mode; langCode: string; question?: string; barcodeCode?: string }; // barcodeCode: set for BARCODE-mode answers
 // The camera's mode strip, as in the iPhone app (mobile/src/logic/modeStrip.ts): BARCODE reads
 // product barcodes; the shutter in BARCODE mode reads the package as Menu / Label instead.
 type StripMode = RequestMode | "barcode";
@@ -817,7 +817,8 @@ export default function SightLine() {
         error: !ok,
         mode: "menu",
         langCode: "en-US",
-        barcode: code,
+        brand: data.brand,
+        barcodeCode: code,
       });
       setStatus("");
       if (ok && data.found) {
@@ -894,7 +895,7 @@ export default function SightLine() {
    *  before reading the same barcode again. */
   const closeSheet = useCallback((r: Result) => {
     setDismissed(r);
-    if (r.barcode) scanRef.current = onAnswerClosed(scanRef.current, Date.now());
+    if (r.barcodeCode) scanRef.current = onAnswerClosed(scanRef.current, Date.now());
   }, []);
 
   // ---------- Settings ----------
@@ -1192,7 +1193,7 @@ export default function SightLine() {
         >
           <div className="flex shrink-0 items-center justify-between gap-3 px-4 pb-2 pt-4">
             <h2 id="result-heading" className={caption}>
-              {result.question ? "Answer" : result.barcode ? "Barcode" : mode === "translate" && result.mode === "translate" ? `Translate to ${language}` : MODE_LABELS[result.mode]}
+              {result.question ? "Answer" : result.barcodeCode ? "Barcode" : mode === "translate" && result.mode === "translate" ? `Translate to ${language}` : MODE_LABELS[result.mode]}
             </h2>
             <button type="button" onClick={() => closeSheet(result)} className={`min-h-11 rounded-xl border-2 border-black px-4 text-[17px] font-semibold ${focus}`}>
               Done
@@ -1276,7 +1277,7 @@ export default function SightLine() {
 
             {result.details && !busy && <Sections sections={result.sections} fallback={result.details} />}
 
-            {features?.lookup && !result.error && !result.barcode && (
+            {features?.lookup && !result.error && !result.barcodeCode && (
               <button
                 type="button"
                 onClick={() => {
