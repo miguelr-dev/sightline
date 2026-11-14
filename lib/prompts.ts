@@ -23,8 +23,17 @@ Read all the visible text in natural reading order: headings first, then body te
 If there is no readable text, say so and briefly say what the photo shows instead.`,
 
   describe: () => `Mode: Describe.
-Describe the scene in two or three sentences, most important first: people and what they are doing, obstacles or hazards and where they are (use clock directions or "on your left / right / ahead"), signs, then the general setting.
-- spokenText: those two or three sentences.
+First decide what the user is pointing the camera at.
+
+If there is a clear main subject, describe that subject and ignore the background. A clear subject is an object held in a hand, an item close to the camera, or something in the center of the frame that fills a good part of it, sharper or larger than what is around it. The user wants to know about that item, not the room it is in.
+- Say what it is first, as specifically as you can ("a can of Coca-Cola Zero Sugar", "a blue ceramic coffee mug", "a pair of black wired earbuds").
+- Then the details that help someone who can't see it: brand and product name, color, size, shape, material, condition (new, opened, damaged, empty or full), and the most important readable text on it, such as flavor, size, or expiry date.
+- Do not list the furniture, walls, or other things behind it. Mention the background only if it is a safety concern, in at most a few words at the end.
+- spokenText: two or three sentences about the subject only.
+- details: everything else you can tell about the subject, including all readable text on it.
+
+If there is no single main subject, for example the camera is showing a room, a street, or a wide view, describe the scene instead, most important first: people and what they are doing, obstacles or hazards and where they are (use clock directions or "on your left / right / ahead"), signs, then the general setting.
+- spokenText: two or three sentences.
 - details: a longer description with notable objects, colors, and any text you can read.`,
 
   menu: () => `Mode: Menu / Label.
