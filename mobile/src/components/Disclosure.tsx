@@ -4,6 +4,7 @@ import { LayoutAnimation, Platform, Pressable, StyleSheet, Text, View, type Text
 import type { Section } from "../modes";
 import { speech } from "../speech";
 import { colors, MIN_TARGET, radius } from "../theme";
+import { provenanceLabel } from "../logic/provenance";
 import { Icon } from "./ui";
 
 // Apple-style disclosure rows: title and chevron, collapsed by default, body underneath.
@@ -82,6 +83,14 @@ function Disclosure({
   // Until the text is measured, guess from length so the button doesn't pop in late.
   const [long, setLong] = useState(() => section.body.length > 320 || section.body.split("\n").length > PREVIEW_LINES);
 
+  // Read all: a section opens by itself while it's being read (More/Less stays as it was).
+  useEffect(() => {
+    if (speaking && !open) {
+      animate(reduceMotion);
+      setOpen(true);
+    }
+  }, [speaking]);
+
   const toggle = () => {
     animate(reduceMotion);
     if (open) {
@@ -105,7 +114,7 @@ function Disclosure({
         onLongPress={readAloud}
         delayLongPress={400}
         accessibilityRole="button"
-        accessibilityLabel={section.title}
+        accessibilityLabel={provenanceLabel(section.provenance) ? `${section.title}, ${provenanceLabel(section.provenance)}` : section.title}
         accessibilityValue={speaking ? { text: "Speaking" } : undefined}
         accessibilityHint={open ? "Hides this section. Long-press to hear it." : "Shows this section. Long-press to hear it."}
         accessibilityState={{ expanded: open }}
@@ -117,7 +126,12 @@ function Disclosure({
         style={({ pressed }) => [s.row, pressed && { opacity: 0.55 }]}
       >
         {speaking ? <Icon sf="speaker.wave.2.fill" ion="volume-high" size={17} /> : null}
-        <Text style={[s.title, { flex: 1 }]}>{section.title}</Text>
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text style={s.title}>{section.title}</Text>
+          {provenanceLabel(section.provenance) ? (
+            <Text style={s.provenance}>{provenanceLabel(section.provenance)}</Text>
+          ) : null}
+        </View>
         <Icon
           sf={open ? "chevron.up" : "chevron.down"}
           ion={open ? "chevron-up" : "chevron-down"}
@@ -192,6 +206,7 @@ const s = StyleSheet.create({
   inset: { borderBottomWidth: 0 },
   rule: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.hairline },
   row: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 56, paddingVertical: 14 },
+  provenance: { fontSize: 13, lineHeight: 17, fontWeight: "600", color: colors.secondary, textTransform: "uppercase", letterSpacing: 0.4 },
   title: { fontSize: 19, lineHeight: 25, fontWeight: "600", letterSpacing: -0.45, color: colors.label },
   bodyWrap: { paddingBottom: 14, gap: 10 },
   body: { fontSize: 19, lineHeight: 28, fontWeight: "400", letterSpacing: -0.45, color: colors.label },

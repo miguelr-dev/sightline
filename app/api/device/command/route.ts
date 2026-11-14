@@ -7,12 +7,13 @@ import {
   type HatCommand,
   type HatCommandType,
   type Mode,
+  type RequestMode,
 } from "@/lib/modes";
 import { parseCommand } from "@/lib/voice";
 import { checkPairCode, matchKey, sharedKey, validHatId } from "@/lib/hat";
 import { readJson } from "@/lib/http";
 import { addDeviceEvent, claimHatRead, dbConfigured, deviceId, pairedPhone } from "@/lib/db";
-import { getFrame, waitForFrame } from "@/lib/frameStore";
+import { getFrame, noteCommand, waitForFrame } from "@/lib/frameStore";
 import { analyzePhoto } from "@/lib/analyze";
 import { webLookup } from "@/lib/lookup";
 
@@ -24,7 +25,15 @@ import { webLookup } from "@/lib/lookup";
 
 export const maxDuration = 60;
 
-const TYPES: HatCommandType[] = ["read", "describe", "menu", "translate", "question", "lookup"];
+const TYPES: HatCommandType[] = [
+  "auto",
+  "read",
+  "describe",
+  "menu",
+  "translate",
+  "question",
+  "lookup",
+];
 const NO_PICTURE = "No picture from your hat camera. Is it on?";
 
 function json(body: Record<string, unknown>, status = 200) {
@@ -96,6 +105,7 @@ export async function POST(request: Request) {
   if (!getFrame(hat)) return reject("no-frame");
 
   const commandId = randomUUID();
+  noteCommand(hat); // the hat's own auto-read stays quiet while this is answered
   console.log(`[hat-command] ${hat} ${JSON.stringify(command)} id=${commandId.slice(0, 8)}`);
   after(() => runCommand(hat, phone, commandId, command));
   return json({ accepted: true, commandId } satisfies DeviceCommandResponse);
@@ -111,14 +121,17 @@ async function runCommand(hat: string, owner: string, commandId: string, command
       return;
     }
     const check = frame.check;
-    const mode: Mode = MODES.includes(command.type as Mode)
-      ? (command.type as Mode)
-      : (check?.suggestedMode ?? (command.type === "lookup" ? "menu" : "describe"));
+    const mode: RequestMode =
+      command.type === "auto"
+        ? "auto" // the server chooses the mode for this frame
+        : MODES.includes(command.type as Mode)
+          ? (command.type as Mode)
+          : (check?.suggestedMode ?? (command.type === "lookup" ? "menu" : "describe"));
     const lang = command.type === "translate" ? (command.language ?? "English") : "English";
 
     // An explicit request always reads (even what was just read), and marks the target as read
     // so the hat's auto-read doesn't read it again straight after.
-    const [{ body: answer, saved }] = await Promise.all([
+    const [{ body: answer, saved, mode: answeredIn }] = await Promise.all([
       analyzePhoto({
         image: Buffer.from(frame.bytes).toString("base64"),
         mode,
@@ -136,7 +149,7 @@ async function runCommand(hat: string, owner: string, commandId: string, command
         commandId,
         command,
         scanId: answer.scanId ?? null,
-        mode,
+        mode: answeredIn ?? (mode === "auto" ? "describe" : mode),
         label: check?.label ?? "",
         key: check?.key ?? "",
         button: false,
@@ -155,8 +168,7 @@ async function runCommand(hat: string, owner: string, commandId: string, command
     // as the app does. Follow-up questions don't.
     const identified = Boolean(answer.webQuery && answer.itemKind && answer.itemKind !== "none");
     const wantLookup =
-      !answer.error &&
-      (command.type === "lookup" || (command.type !== "question" && identified));
+      !answer.error && (command.type === "lookup" || (command.type !== "question" && identified));
     if (!wantLookup) return;
     const { body: lookup } = await webLookup(
       {
@@ -164,7 +176,11 @@ async function runCommand(hat: string, owner: string, commandId: string, command
         itemKind: answer.itemKind ?? "none",
         scanId: answer.scanId,
         language: lang,
-        context: { mode, spokenText: answer.spokenText, details: answer.details },
+        context: {
+          mode: answeredIn ?? (mode === "auto" ? "describe" : mode),
+          spokenText: answer.spokenText,
+          details: answer.details,
+        },
       },
       { device: owner, persist: "await" },
     );

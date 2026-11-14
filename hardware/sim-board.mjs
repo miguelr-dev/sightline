@@ -14,8 +14,10 @@
 // While it runs, press Enter to send the next frame with x-device-button: 1.
 // DEVICE_SHARED_KEY comes from .env.local (the npm script loads it). It is never printed.
 //
-// --watch polls as a pretend phone ("sim-watcher"), which pairs the hat with that phone until the
-// real phone polls again. Leave it off when the iPhone app is the one listening.
+// --watch polls as a pretend phone ("sim-watcher"). If no phone holds the hat it pairs with it, and
+// keeps it for 60 s after the sim stops, so the iPhone gets 409 until then. If the iPhone already
+// holds it, --watch gets 409. Leave --watch off when the iPhone app is listening, or test with
+// another hat ID (--device sim-01).
 
 import { createHmac } from "node:crypto";
 import { spawn } from "node:child_process";
@@ -67,8 +69,8 @@ function webcamSource() {
   // One long-running ffmpeg keeps overwriting frame.jpg about twice a second.
   const ff = spawn(
     "ffmpeg",
-    ["-loglevel", "error", "-f", "avfoundation", "-framerate", "30", "-video_size", "1280x720",
-     "-i", `${cam}:none`, "-vf", "fps=2", "-q:v", "4", "-update", "1", "-y", out],
+    ["-loglevel", "error", "-f", "avfoundation", "-framerate", "30", "-pixel_format", "nv12", "-i", `${cam}:none`,
+     "-vf", "fps=2,scale='min(1280,iw)':-2", "-q:v", "4", "-update", "1", "-y", out],
     { stdio: ["ignore", "ignore", "inherit"] },
   );
   ff.on("error", () => {
@@ -77,7 +79,7 @@ function webcamSource() {
   });
   ff.on("exit", (code) => {
     if (code) {
-      console.error(`ffmpeg exited (${code}). Give your terminal camera access in System Settings > Privacy & Security > Camera, or try --camera 1.`);
+      console.error(`ffmpeg exited (${code}). Give your terminal Camera access (System Settings > Privacy & Security > Camera), or try --camera 1. List cameras: ffmpeg -f avfoundation -list_devices true -i ""`);
       process.exit(1);
     }
   });
@@ -154,6 +156,10 @@ async function watch() {
         signal: AbortSignal.timeout(10000),
       });
       const body = await res.json().catch(() => ({}));
+      if (res.status === 409) {
+        console.log("  [next] 409: another phone holds this hat; --watch stops. (Fine: the phone gets the events.)");
+        return;
+      }
       if (!res.ok) console.log(`  [next] ${res.status}: ${JSON.stringify(body)}`);
       else {
         // Skip the backlog from earlier runs on the first poll.

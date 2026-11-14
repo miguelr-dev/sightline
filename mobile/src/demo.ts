@@ -58,14 +58,18 @@ const VOICES: Voice[] = [
 type Demo = {
   shot: Shot | null;
   sheet: "none" | "result" | "settings" | "language" | "recent";
-  mode: Mode;
+  mode: import("./logic/modeStrip").StripMode;
   photo: number;
   voices: Voice[] | null;
   hint: string | null;
   scans: Scan[] | null;
   detection: { key: string; label: string; mode: Mode | null; confidence: number | null } | null;
   hat: boolean;
+  book: import("./logic/book").BookState | null;
   hatAsking: string | null;
+  caption: { phase: "asking"; text: string; status: string } | null;
+  frozen: string | null;
+  barcode: import("./modes").BarcodeResult | null;
   ask: { status: "done"; question: string; answer: AskAnswer; id: number } | null;
 };
 
@@ -86,24 +90,88 @@ export function demoState(): Demo | null {
     followUps: [],
     web: { status: "done", data: LOOKUP(uri) },
   };
+  const barcodeShot: Shot = {
+    id: 7,
+    photo: null,
+    mode: "menu",
+    language: "Spanish",
+    result: {
+      spokenText: "Coca-Cola Classic, 330 millilitre can. 139 calories and 35 grams of sugar per can. No allergens listed.",
+      details: "",
+      sections: [
+        { title: "Nutrition", body: "Per 330 ml can: 139 kcal, 35 g sugars, 0 g fat, 0 g protein, 0 g salt." },
+        { title: "Ingredients", body: "Carbonated water, sugar, colour (caramel E150d), phosphoric acid, natural flavourings including caffeine." },
+        { title: "Allergens", body: "None listed." },
+        { title: "Score", body: "Nutri-Score E. Ultra-processed (NOVA 4)." },
+      ],
+    },
+    followUps: [],
+    web: { status: "idle" },
+    fromHistory: true,
+    label: "Barcode",
+  };
   return {
-    shot,
+    shot: q === "barcode-result" ? barcodeShot : shot,
     sheet:
-      q === "result" || q === "web"
+      q === "result" || q === "web" || q === "barcode-result"
         ? "result"
         : q === "settings"
           ? "settings"
           : q === "recent" || q === "recent-ask"
             ? "recent"
             : "none",
-    mode: q === "translate" ? "translate" : "menu",
+    mode: q === "translate" ? "translate" : q === "barcode-mode" ? "barcode" : "auto",
     photo,
     voices: VOICES,
     hint: null,
     detection:
       q === "home" || q === "hat" ? { key: "harbor-table-menu", label: "Harbor Table menu", mode: "menu", confidence: 0.92 } : null,
     hat: q === "hat",
+    book:
+      q === "book" || q === "book-turn"
+        ? {
+            status: q === "book" ? "reading" : "waitingTurn",
+            pageIndex: 0,
+            sentence: q === "book" ? 2 : 6,
+            prompted: q === "book-turn",
+            pages: [
+              {
+                text: "",
+                signature: "p1",
+                complete: true,
+                pageNumber: 37,
+                sentences: [
+                  "The house on the hill had been empty for years.",
+                  "Nobody in the village could say who had lived there last.",
+                  "But on the first cold night of autumn, a light came on in the attic window.",
+                  "Maya saw it from her bedroom and pressed her face to the glass.",
+                  "The light flickered twice, then held steady.",
+                  "She pulled on her boots, took her grandfather's torch, and slipped out the back door.",
+                  "The wind smelled of rain.",
+                ],
+              },
+            ],
+          }
+        : null,
     hatAsking: null,
+    caption: q === "looking" ? { phase: "asking", text: "What does this sign say?", status: "Reading…" } : null,
+    frozen: q === "looking" ? uri : null,
+    barcode:
+      q === "barcode"
+        ? {
+            code: "5449000000996",
+            found: true,
+            title: "Coca-Cola Classic",
+            spokenText: "Coca-Cola Classic, 330 millilitre can. 139 calories and 35 grams of sugar per can. No allergens listed.",
+            sections: [
+              { title: "Nutrition", body: "Per 330 ml can: 139 kcal, 35 g sugars, 0 g fat, 0 g protein, 0 g salt." },
+              { title: "Ingredients", body: "Carbonated water, sugar, colour (caramel E150d), phosphoric acid, natural flavourings including caffeine." },
+              { title: "Allergens", body: "None listed." },
+              { title: "Score", body: "Nutri-Score E. Ultra-processed (NOVA 4)." },
+            ],
+            itemKind: "food_drink",
+          }
+        : null,
     ask:
       q === "recent-ask"
         ? {

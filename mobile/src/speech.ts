@@ -1,6 +1,8 @@
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer, type AudioStatus } from "expo-audio";
 import * as Speech from "expo-speech";
+import { File, Paths } from "expo-file-system";
 import { speakClip } from "./api";
+import { ClipCache } from "./logic/clipCache";
 
 // Speech output. ElevenLabs voices through /api/speak, played with expo-audio, one sentence-sized
 // chunk at a time with the next chunk fetched while the current one plays. Falls back to the
@@ -37,7 +39,22 @@ function chunk(text: string, max: number, firstMax = max): string[] {
   return out.length ? out : [text];
 }
 
-type Item = { text: string; lang: string };
+// kind: "speech" goes through ElevenLabs (or the device voice); "device" always uses the iPhone
+// voice (hints); "preview" plays a voice sample. Everything goes through one queue, so nothing
+// overlaps and nothing queued is lost.
+type Item =
+  | { kind: "speech"; text: string; lang: string; owner?: string | null }
+  | { kind: "device"; text: string; lang: string }
+  | { kind: "preview"; voiceId: string; previewUrl?: string };
+
+function deleteFile(uri: string) {
+  try {
+    const f = new File(uri);
+    if (f.exists) f.delete();
+  } catch {
+    // Already gone or not ours.
+  }
+}
 // owner: who started the current speech (e.g. a section id), so its UI can show "speaking".
 type Listener = (speaking: boolean, owner: string | null) => void;
 
@@ -47,7 +64,7 @@ class SpeechEngine {
   private draining = false;
   private player: AudioPlayer | null = null;
   private finish: (() => void) | null = null;
-  private cache = new Map<string, string>();
+  private cache = new ClipCache(CACHE_LIMIT, deleteFile);
   private cooldownUntil = 0;
   private listeners = new Set<Listener>();
   owner: string | null = null;
@@ -57,6 +74,14 @@ class SpeechEngine {
   serverHasVoice: boolean | null = null; // from /api/features; null = unknown, try it
 
   async init() {
+    // Clips from earlier sessions are never reused: clear them out.
+    try {
+      for (const entry of Paths.cache.list()) {
+        if (entry instanceof File && /\/speak-[^/]+\.mp3$/.test(entry.uri)) deleteFile(entry.uri);
+      }
+    } catch {
+      // Listing the cache folder isn't essential.
+    }
     try {
       await setAudioModeAsync({ playsInSilentMode: true, interruptionMode: "duckOthers", allowsRecording: false });
     } catch {
@@ -81,26 +106,33 @@ class SpeechEngine {
   speak(text: string, lang = "en-US", opts: { queue?: boolean; owner?: string } = {}) {
     const t = text.trim();
     if (!t) return;
-    if (!opts.queue) {
-      this.stop();
-      this.owner = opts.owner ?? null;
-    }
-    this.queue.push({ text: t, lang });
+    if (!opts.queue) this.stop();
+    this.queue.push({ kind: "speech", text: t, lang, owner: opts.owner ?? null });
+    if (!this.draining) void this.drain();
+  }
+
+  /** Read several pieces in order, each with its own owner (Read all). Stops what's playing. */
+  speakAll(items: { owner: string; text: string }[], lang = "en-US") {
+    this.stop();
+    for (const it of items) if (it.text.trim()) this.queue.push({ kind: "speech", text: it.text.trim(), lang, owner: it.owner });
     if (!this.draining) void this.drain();
   }
 
   /** Short prompts (auto-capture hints) use the on-device voice: instant, no network. */
   hint(text: string, lang = "en-US") {
     this.stop();
-    Speech.speak(text, { language: lang, rate: this.rate });
+    this.queue.push({ kind: "device", text, lang });
+    void this.drain();
   }
 
-  /** Voice picker preview: the voice's own sample if there is one, else a line through /api/speak. */
-  async preview(voiceId: string, previewUrl?: string) {
+  /** Voice picker preview: stops what's playing, then plays the sample through the queue. */
+  preview(voiceId: string, previewUrl?: string) {
     this.stop();
-    const run = this.run;
-    this.draining = true;
-    this.emit(true);
+    this.queue.push({ kind: "preview", voiceId, previewUrl });
+    void this.drain();
+  }
+
+  private async playPreview(run: number, voiceId: string, previewUrl?: string) {
     let ok = false;
     if (previewUrl) ok = await this.playFile(run, previewUrl, 200);
     if (!ok && run === this.run) {
@@ -111,11 +143,10 @@ class SpeechEngine {
         nextText: "",
         voiceId: voiceId || undefined,
       });
-      if (uri && run === this.run) await this.playFile(run, uri, 90);
-    }
-    if (run === this.run) {
-      this.draining = false;
-      this.emit(false);
+      if (uri && run === this.run) {
+        await this.playFile(run, uri, 90);
+        deleteFile(uri);
+      }
     }
   }
 
@@ -157,7 +188,14 @@ class SpeechEngine {
     this.emit(true);
     while (this.queue.length && run === this.run) {
       const item = this.queue.shift()!;
-      if (this.useNatural()) await this.sayNatural(run, item);
+      // Each item names its owner (e.g. a section being read) so the UI can mark it.
+      const owner = item.kind === "speech" ? (item.owner ?? null) : null;
+      if (owner !== this.owner) {
+        this.owner = owner;
+        this.emit(true);
+      }
+      if (item.kind === "preview") await this.playPreview(run, item.voiceId, item.previewUrl);
+      else if (item.kind === "speech" && this.useNatural()) await this.sayNatural(run, item);
       else await this.sayDevice(run, item.text, item.lang);
     }
     if (run === this.run) {
@@ -176,12 +214,11 @@ class SpeechEngine {
       if (status === 404 || status === 503) this.serverHasVoice = false; // no route, or no key
       return null;
     }
-    this.cache.set(key, uri);
-    if (this.cache.size > CACHE_LIMIT) this.cache.delete(this.cache.keys().next().value!);
+    this.cache.set(key, uri); // drops (and deletes) the oldest clip past the limit
     return uri;
   }
 
-  private async sayNatural(run: number, item: Item) {
+  private async sayNatural(run: number, item: { text: string; lang: string }) {
     const parts = chunk(item.text, CHUNK, FIRST_CHUNK);
     // Fetch the first two clips at once and stay two ahead, so playback starts as soon as the
     // first short clip lands and never waits between chunks.

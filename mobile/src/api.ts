@@ -1,7 +1,11 @@
 import { fetch } from "expo/fetch";
 import { File, Paths, UploadType } from "expo-file-system";
-import type { AnalyzeResponse, AskAnswer, DeviceEvent, Features, FrameCheck, ItemKind, LookupResponse, Mode, Scan, Voice } from "./modes";
+import type { AnalyzeResponse, AskAnswer, BarcodeResult, DeviceEvent, Features, FrameCheck, ItemKind, LookupResponse, Mode, Scan, Voice } from "./modes";
 import { cleanSections, httpsUrl, MODES, UNKNOWN_FEATURES } from "./modes";
+import { parseHistoryScan, parseLookup } from "./logic/parse";
+import { withTimeout } from "./logic/timeout";
+import type { StripMode } from "./logic/modeStrip";
+import { parseBookPage } from "./logic/book";
 
 // Every call goes to the SightLine Next.js server. No API keys live in the app.
 
@@ -72,6 +76,7 @@ export async function getFeatures(): Promise<{ reachable: boolean; features: Fea
         history: typeof f.history === "boolean" ? f.history : null,
         ask: typeof f.ask === "boolean" ? f.ask : null,
         hatCommands: typeof f.hatCommands === "boolean" ? f.hatCommands : null,
+        barcode: typeof f.barcode === "boolean" ? f.barcode : null,
       },
     };
   } catch {
@@ -83,9 +88,13 @@ export async function getFeatures(): Promise<{ reachable: boolean; features: Fea
 
 export async function analyze(req: {
   image: string;
-  mode: Mode;
+  mode: StripMode; // "auto" lets the server pick
   language?: string;
   question?: string;
+  utterance?: string; // "ask while looking": what the user said with this fresh photo
+  key?: string; // frame-check key of the item, when reading from the detection card
+  conversation?: { question: string; answer: string }[]; // earlier turns about this result (max 6)
+  book?: boolean; // book mode: the reply carries `page`
 }): Promise<AnalyzeResponse> {
   const r = await postJson<AnalyzeResponse>("/api/analyze", req, 55_000);
   if (r.data && typeof r.data.spokenText === "string") {
@@ -93,8 +102,14 @@ export async function analyze(req: {
       ...r.data,
       sections: cleanSections(r.data.sections),
       scanId: typeof r.data.scanId === "string" && r.data.scanId ? r.data.scanId : undefined,
+      interpreted:
+        r.data.interpreted && typeof r.data.interpreted === "object" && MODES.includes(r.data.interpreted.mode)
+          ? r.data.interpreted
+          : undefined,
+      autoLookup: r.data.autoLookup === true,
+      page: parseBookPage((r.data as { page?: unknown }).page) ?? undefined,
     };
-    return r.ok ? data : { ...data, error: true };
+    return r.ok ? { ...data, httpStatus: r.status } : { ...data, error: true, httpStatus: r.status };
   }
   if (r.status === -1) {
     return { spokenText: "That took too long, so I stopped. Please try again.", details: "", error: true };
@@ -107,6 +122,7 @@ export async function lookup(req: {
   query: string;
   itemKind?: ItemKind;
   scanId?: string;
+  language?: string; // Translate mode: write the summary in this language
   context: { mode: Mode; spokenText: string; details: string };
 }): Promise<LookupResponse | null> {
   const r = await postJson<LookupResponse>("/api/lookup", req, 25_000);
@@ -173,12 +189,14 @@ export async function transcribe(fileUri: string): Promise<{ text: string; statu
   if (!baseUrl) return { text: "", status: 0 };
   try {
     const f = new File(fileUri);
-    const res = await f.upload(`${baseUrl}/api/transcribe`, {
+    const upload = f.upload(`${baseUrl}/api/transcribe`, {
       httpMethod: "POST",
       uploadType: UploadType.BINARY_CONTENT,
       mimeType: "audio/mp4",
       headers: { "Content-Type": "audio/mp4", ...baseHeaders() },
     });
+    const res = await withTimeout(upload.then((r) => r as typeof r | null), 15_000, null);
+    if (!res) return { text: "", status: -1 }; // timed out
     let text = "";
     try {
       const data = JSON.parse(res.body) as { text?: unknown };
@@ -197,6 +215,8 @@ export async function frameCheck(req: {
   image: string;
   mode: Mode;
   language?: string;
+  lastKey?: string; // the card's current item, so the server keeps the same key for it
+  lastLabel?: string;
 }): Promise<{ status: number; data: FrameCheck | null }> {
   const r = await postJson<FrameCheck>("/api/frame-check", req, 6000);
   if (!r.ok || !r.data || typeof r.data.ready !== "boolean") return { status: r.status, data: null };
@@ -241,26 +261,6 @@ export async function getVoices(): Promise<Voice[] | null> {
   }
 }
 
-function parseLookup(v: unknown): LookupResponse | null {
-  if (!v || typeof v !== "object") return null;
-  const l = v as Partial<LookupResponse>;
-  if (typeof l.spokenText !== "string" || !l.spokenText.trim()) return null;
-  return {
-    spokenText: l.spokenText,
-    details: typeof l.details === "string" ? l.details : "",
-    query: typeof l.query === "string" ? l.query : "",
-    itemKind: l.itemKind,
-    image: httpsUrl(l.image),
-    sections: cleanSections(l.sections),
-    sources: Array.isArray(l.sources)
-      ? l.sources
-          .filter((x) => x && typeof x.url === "string" && typeof x.title === "string")
-          .map((x) => ({ title: x.title, url: x.url, thumbnail: httpsUrl(x.thumbnail) }))
-      : [],
-    error: l.error === true,
-  };
-}
-
 // Recent scans for this device. null = history isn't available on this server (404, off, down).
 export async function getHistory(limit = 20): Promise<Scan[] | null> {
   if (!baseUrl) return null;
@@ -271,23 +271,7 @@ export async function getHistory(limit = 20): Promise<Scan[] | null> {
     if (!res.ok) return null;
     const data = (await res.json()) as { scans?: unknown };
     if (!Array.isArray(data.scans)) return null;
-    return data.scans
-      .filter((x): x is Record<string, unknown> => !!x && typeof x === "object")
-      .filter((x) => (typeof x.id === "string" || typeof x.id === "number") && typeof x.spokenText === "string")
-      .map((x) => {
-        const lk = parseLookup(x.lookup);
-        return {
-          id: String(x.id),
-          createdAt: typeof x.createdAt === "string" ? x.createdAt : "",
-          mode: MODES.includes(x.mode as Mode) ? (x.mode as Mode) : "describe",
-          itemKind: typeof x.itemKind === "string" ? (x.itemKind as ItemKind) : undefined,
-          title: typeof x.title === "string" && x.title.trim() ? x.title.trim() : (x.spokenText as string).slice(0, 60),
-          spokenText: x.spokenText as string,
-          sections: cleanSections(x.sections),
-          lookup: lk,
-          image: httpsUrl(x.image) ?? lk?.image,
-        };
-      });
+    return data.scans.map(parseHistoryScan).filter((x): x is Scan => x !== null);
   } catch {
     return null;
   } finally {
@@ -298,8 +282,14 @@ export async function getHistory(limit = 20): Promise<Scan[] | null> {
 export async function clearHistory(): Promise<boolean> {
   if (!baseUrl) return false;
   try {
-    const res = await fetch(`${baseUrl}/api/history`, { method: "DELETE", headers: baseHeaders() });
-    return res.ok;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const res = await fetch(`${baseUrl}/api/history`, { method: "DELETE", headers: baseHeaders(), signal: controller.signal });
+      return res.ok;
+    } finally {
+      clearTimeout(timer);
+    }
   } catch {
     return false;
   }
@@ -317,7 +307,7 @@ export async function deviceNext(
   hardwareId: string,
   pairCode: string,
   after: string,
-): Promise<{ status: number; events: DeviceEvent[] }> {
+): Promise<{ status: number; events: DeviceEvent[]; reason?: string }> {
   if (!baseUrl) return { status: 0, events: [] };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
@@ -330,7 +320,10 @@ export async function deviceNext(
       headers: { ...baseHeaders(), "x-pair-code": pairCode },
       signal: controller.signal,
     });
-    if (!res.ok) return { status: res.status, events: [] };
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { reason?: unknown } | null;
+      return { status: res.status, events: [], reason: typeof body?.reason === "string" ? body.reason : undefined };
+    }
     const data = (await res.json()) as { events?: unknown };
     const events = Array.isArray(data.events)
       ? data.events
@@ -443,4 +436,37 @@ export async function sendHatCommand(
               ? "offline"
               : "error",
   };
+}
+
+/** Let go of the hat so another phone can pair at once. Best effort: ignored if the route is missing. */
+export async function unpairHat(hardwareId: string, pairCode: string): Promise<void> {
+  await postJson("/api/device/unpair", { device: hardwareId, pair: pairCode }, 5000).catch(() => undefined);
+}
+
+// Product by barcode. null = route missing or the request failed (the card isn't shown).
+export async function lookupBarcode(code: string, language?: string): Promise<BarcodeResult | null> {
+  if (!baseUrl) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12_000);
+  try {
+    const q = `code=${encodeURIComponent(code)}${language ? `&language=${encodeURIComponent(language)}` : ""}`;
+    const res = await fetch(`${baseUrl}/api/barcode?${q}`, { headers: baseHeaders(), signal: controller.signal });
+    if (!res.ok) return null;
+    const d = (await res.json()) as Record<string, unknown>;
+    if (typeof d.spokenText !== "string" || !d.spokenText.trim()) return null;
+    return {
+      code: typeof d.code === "string" ? d.code : code,
+      found: d.found === true,
+      spokenText: d.spokenText.trim(),
+      sections: cleanSections(d.sections),
+      itemKind: typeof d.itemKind === "string" ? (d.itemKind as BarcodeResult["itemKind"]) : undefined,
+      image: httpsUrl(d.image),
+      title: typeof d.title === "string" && d.title.trim() ? d.title.trim() : undefined,
+      scanId: typeof d.scanId === "string" || typeof d.scanId === "number" ? String(d.scanId) : undefined,
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }

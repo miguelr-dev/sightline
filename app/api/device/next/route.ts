@@ -1,10 +1,10 @@
 import { checkPairCode, sharedKey, validHatId } from "@/lib/hat";
-import { dbConfigured, deviceEventsAfter, deviceId, pairHat, pairedPhone } from "@/lib/db";
+import { claimPairing, dbConfigured, deviceEventsAfter, deviceId } from "@/lib/db";
 
 // The paired phone polls this about every 700 ms for the hat's new events:
 //   GET /api/device/next?device=<hat id>&pair=<pair code>&after=<last event id>
-// with its x-sightline-device header. A correct pair code also pairs this phone with the hat,
-// so the hat's scans go into this phone's history.
+// with its x-sightline-device header. A correct pair code also pairs this phone with the hat
+// (if no other phone holds it), so the hat's scans go into this phone's history.
 
 function json(body: Record<string, unknown>, status = 200) {
   return Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
@@ -25,8 +25,17 @@ export async function GET(request: Request) {
   const afterParam = url.searchParams.get("after");
   const afterId = afterParam && /^\d{1,15}$/.test(afterParam) ? Number(afterParam) : null;
 
-  const [owner, events] = await Promise.all([pairedPhone(hat), deviceEventsAfter(hat, afterId)]);
-  if (owner !== phone) await pairHat(hat, phone);
+  // The first phone to poll stays paired until it unpairs (/api/device/unpair) or stops
+  // polling for 60 s. Another phone with the code gets 409 instead of taking the hat over.
+  const pairing = await claimPairing(hat, phone);
+  if (pairing === undefined) return json({ error: "can't reach the database" }, 503);
+  if (pairing === "elsewhere") {
+    return json(
+      { error: "this hat is paired with another phone", reason: "paired-elsewhere" },
+      409,
+    );
+  }
+  const events = await deviceEventsAfter(hat, afterId);
 
   const list = events ?? [];
   return json({

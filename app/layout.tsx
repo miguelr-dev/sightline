@@ -9,7 +9,13 @@ const atkinson = Atkinson_Hyperlegible({
   display: "swap",
 });
 
+// Absolute URLs for the Open Graph image, so link previews (Devpost, Slack) work once deployed.
+const siteUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL
+  ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+  : "http://localhost:3000";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
   title: "SightLine",
   description:
     "Point your camera. Hear the world. An AI accessibility copilot for blind and low-vision users.",

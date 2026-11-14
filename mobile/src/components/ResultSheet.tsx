@@ -1,5 +1,9 @@
 import { Image } from "expo-image";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { listenAction } from "../logic/webSpeech";
+import { lookupLanguage } from "../logic/lookupRequest";
+import { initialReadAll, reduceReadAll, type ReadAllEvent, type ReadAllState } from "../logic/readAll";
+import { speech } from "../speech";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -63,6 +67,27 @@ export function ResultSheet(p: Props) {
   const askBusy = !!shot?.followUps.some((f) => !f.answer);
   const lang = shot?.mode === "translate" ? languageCode(shot.language) : "en-US";
 
+  // Read all: every section (answer, then web) in order, one owner per section.
+  const [readAll, setReadAllState] = useState<ReadAllState>(initialReadAll);
+  const readAllRef = useRef<ReadAllState>(initialReadAll);
+  const setReadAll = (st: ReadAllState) => {
+    readAllRef.current = st;
+    setReadAllState(st);
+  };
+  const dispatchReadAll = (e: ReadAllEvent) => {
+    const r = reduceReadAll(readAllRef.current, e);
+    setReadAll(r.state); // before the effects: stopping speech reports back synchronously
+    for (const fx of r.effects) {
+      if (fx.type === "stopSpeech") speech.stop();
+      else speech.speakAll(fx.items, lang);
+    }
+  };
+  useEffect(
+    () => speech.subscribe((on, owner) => setReadAll(reduceReadAll(readAllRef.current, { type: "speaking", owner: on ? owner : null }).state)),
+    [],
+  );
+  useEffect(() => setReadAll(initialReadAll), [shot?.id, p.visible]); // new result or sheet closed
+
   const send = () => {
     const q = question.trim();
     if (!q || askBusy) return;
@@ -83,7 +108,7 @@ export function ResultSheet(p: Props) {
       <View style={s.root}>
         <View style={s.header}>
           <Text style={type.caption} accessibilityRole="header">
-            {shot ? (shot.mode === "translate" ? `Translate to ${shot.language}` : MODE_LABELS[shot.mode]) : ""}
+            {shot ? shot.label ?? (shot.mode === "translate" ? `Translate to ${shot.language}` : MODE_LABELS[shot.mode]) : ""}
           </Text>
           <Pressable
             onPress={p.onClose}
@@ -102,6 +127,21 @@ export function ResultSheet(p: Props) {
             contentContainerStyle={[s.content, { paddingBottom: insets.bottom + 32 }]}
             keyboardShouldPersistTaps="handled"
           >
+            {shot?.thread?.length ? (
+              <View style={s.thread} accessibilityLabel="Earlier in this conversation">
+                {shot.thread.map((t, i) => (
+                  <View key={i} style={{ gap: 2 }}>
+                    <Text style={[type.subhead, { fontWeight: "600", color: colors.label }]}>“{t.question}”</Text>
+                    <Text style={type.subhead}>{t.answer}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+            {shot?.asked ? (
+              <Text style={s.asked} accessibilityLabel={`You asked: ${shot.asked}`}>
+                “{shot.asked}”
+              </Text>
+            ) : null}
             {shot?.photo ? (
               <Image
                 source={{ uri: shot.photo.uri }}
@@ -176,6 +216,32 @@ export function ResultSheet(p: Props) {
                   />
                 </View>
 
+                {(() => {
+                  const answerSecs = sectionsOf(r);
+                  const webSecs = shot!.web.status === "done" ? shot!.web.data.sections ?? [] : [];
+                  if (answerSecs.length + webSecs.length < 2) return null;
+                  const reading = readAll.status === "reading";
+                  return (
+                    <PillButton
+                      label={reading ? "Stop reading" : "Read all"}
+                      variant="secondary"
+                      onPress={() =>
+                        dispatchReadAll(
+                          reading
+                            ? { type: "stop" }
+                            : {
+                                type: "start",
+                                prefix: `r-${shot!.id}`,
+                                sections: answerSecs,
+                                more: webSecs.length ? [{ prefix: `w-${shot!.id}`, sections: webSecs }] : [],
+                              },
+                        )
+                      }
+                      accessibilityHint={reading ? "Stops reading the sections" : "Reads every section aloud, in order"}
+                      icon={<Icon sf={reading ? "stop.fill" : "text.line.first.and.arrowtriangle.forward"} ion={reading ? "stop" : "list"} size={17} />}
+                    />
+                  );
+                })()}
                 <SectionList key={`r-${shot!.id}`} idPrefix={`r-${shot!.id}`} lang={lang} sections={sectionsOf(r)} reduceMotion={p.reduceMotion} />
 
                 {shot!.followUps.map((f) => (
@@ -272,6 +338,11 @@ function WebCard({
   reduceMotion: boolean;
 }) {
   const [heroFailed, setHeroFailed] = useState(false);
+  const [owner, setOwner] = useState<string | null>(speech.owner);
+  useEffect(() => speech.subscribe((on, who) => setOwner(on ? who : null)), []);
+  const webOwner = `web-${shot.id}`;
+  const listening = owner === webOwner;
+  const webLang = lookupLanguage(shot.mode, shot.language) ? languageCode(shot.language) : "en-US";
   const w = shot.web;
   if (w.status === "idle") {
     if (!canLookup) return null;
@@ -312,6 +383,20 @@ function WebCard({
           <Text style={type.body} selectable>
             {w.data.spokenText.replace(/^From the web:\s*/i, "")}
           </Text>
+          {!w.data.error ? (
+            <PillButton
+              label={listening ? "Stop" : "Listen"}
+              variant="primary"
+              onPress={() =>
+                listenAction({ speakingOwner: owner }, webOwner) === "stop"
+                  ? speech.stop()
+                  : speech.speak(w.data.spokenText, webLang, { owner: webOwner })
+              }
+              accessibilityLabel={listening ? "Stop reading the web summary" : "Listen to the web summary"}
+              icon={<Icon sf={listening ? "stop.fill" : "speaker.wave.2.fill"} ion={listening ? "stop" : "volume-high"} size={18} color={colors.onPrimary} />}
+              style={{ alignSelf: "flex-start" }}
+            />
+          ) : null}
           <SectionList key={`w-${shot.id}`} idPrefix={`w-${shot.id}`} sections={w.data.sections ?? []} reduceMotion={reduceMotion} inset />
           {w.data.sources.length ? (
             <View style={{ marginTop: 4 }}>
@@ -379,6 +464,8 @@ const s = StyleSheet.create({
   done: { minHeight: MIN_TARGET, minWidth: MIN_TARGET, paddingHorizontal: 12, justifyContent: "center", alignItems: "center" },
   content: { paddingHorizontal: 20, paddingTop: 4, gap: 20 },
   photo: { width: "100%", borderRadius: radius.card, backgroundColor: colors.surface },
+  thread: { gap: 10, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.hairline },
+  asked: { fontSize: 24, lineHeight: 31, fontWeight: "600", letterSpacing: -0.3, color: colors.label },
   looking: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 8 },
   lead: { fontSize: 22, lineHeight: 30, fontWeight: "400", letterSpacing: -0.26, color: colors.label },
   errorRow: { flexDirection: "row", gap: 10, alignItems: "flex-start" },
