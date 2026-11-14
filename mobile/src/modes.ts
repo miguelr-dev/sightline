@@ -76,9 +76,10 @@ export type Features = {
   transcribe: boolean | null;
   lookup: boolean | null;
   history: boolean | null;
+  ask: boolean | null; // "Ask your history" (/api/ask)
 };
 
-export const UNKNOWN_FEATURES: Features = { elevenlabs: null, transcribe: null, lookup: null, history: null };
+export const UNKNOWN_FEATURES: Features = { elevenlabs: null, transcribe: null, lookup: null, history: null, ask: null };
 
 export type FrameCheck = {
   ready: boolean;
@@ -127,4 +128,12 @@ export type DeviceEvent = {
   createdAt: string;
   kind: "detected" | "answer" | "hint";
   payload: Record<string, unknown>;
+};
+
+// POST /api/ask: an answer about the user's earlier scans.
+export type AskAnswer = {
+  spokenText: string;
+  sections: Section[];
+  scans: { id: string; title: string; createdAt: string }[];
+  error?: boolean;
 };

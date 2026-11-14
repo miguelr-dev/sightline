@@ -1,6 +1,6 @@
 import { Asset } from "expo-asset";
 import { Platform } from "react-native";
-import type { AnalyzeResponse, LookupResponse, Mode, Scan, Voice } from "./modes";
+import type { AnalyzeResponse, AskAnswer, LookupResponse, Mode, Scan, Voice } from "./modes";
 import type { Shot } from "./types";
 
 // Web-only fixture for design screenshots (npx expo export --platform web, then open
@@ -65,6 +65,7 @@ type Demo = {
   scans: Scan[] | null;
   detection: { key: string; label: string; mode: Mode | null; confidence: number | null } | null;
   hat: boolean;
+  ask: { status: "done"; question: string; answer: AskAnswer; id: number } | null;
 };
 
 const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
@@ -86,7 +87,14 @@ export function demoState(): Demo | null {
   };
   return {
     shot,
-    sheet: q === "result" || q === "web" ? "result" : q === "settings" ? "settings" : q === "recent" ? "recent" : "none",
+    sheet:
+      q === "result" || q === "web"
+        ? "result"
+        : q === "settings"
+          ? "settings"
+          : q === "recent" || q === "recent-ask"
+            ? "recent"
+            : "none",
     mode: q === "translate" ? "translate" : "menu",
     photo,
     voices: VOICES,
@@ -94,6 +102,22 @@ export function demoState(): Demo | null {
     detection:
       q === "home" || q === "hat" ? { key: "harbor-table-menu", label: "Harbor Table menu", mode: "menu", confidence: 0.92 } : null,
     hat: q === "hat",
+    ask:
+      q === "recent-ask"
+        ? {
+            status: "done",
+            question: "How much was the salmon?",
+            id: 1,
+            answer: {
+              spokenText: "The grilled salmon with lemon butter was 24 dollars, on the Harbor Table lunch menu you scanned 2 minutes ago.",
+              sections: [
+                { title: "Other mains", body: "Mushroom Risotto, $18.00\nFish Tacos (spicy), $16.50\nClassic Cheeseburger, $15.00" },
+                { title: "Allergens", body: "The menu doesn't list allergens for the salmon. It says to ask staff." },
+              ],
+              scans: [{ id: "1", title: "Harbor Table lunch menu", createdAt: ago(2) }],
+            },
+          }
+        : null,
     scans: [
       { id: "1", createdAt: ago(2), mode: "menu", itemKind: "restaurant", title: "Harbor Table lunch menu", spokenText: RESULT.spokenText, sections: RESULT.sections ?? [], lookup: LOOKUP(uri), image: uri },
       { id: "2", createdAt: ago(38), mode: "menu", itemKind: "medicine", title: "Ibuprofen 200 mg tablets", spokenText: "Ibuprofen 200 milligram tablets, 50 count.", sections: [], lookup: null },

@@ -1,6 +1,6 @@
 import { fetch } from "expo/fetch";
 import { File, Paths, UploadType } from "expo-file-system";
-import type { AnalyzeResponse, DeviceEvent, Features, FrameCheck, ItemKind, LookupResponse, Mode, Scan, Voice } from "./modes";
+import type { AnalyzeResponse, AskAnswer, DeviceEvent, Features, FrameCheck, ItemKind, LookupResponse, Mode, Scan, Voice } from "./modes";
 import { cleanSections, httpsUrl, MODES, UNKNOWN_FEATURES } from "./modes";
 
 // Every call goes to the SightLine Next.js server. No API keys live in the app.
@@ -70,6 +70,7 @@ export async function getFeatures(): Promise<{ reachable: boolean; features: Fea
         transcribe: typeof f.transcribe === "boolean" ? f.transcribe : null,
         lookup: typeof f.lookup === "boolean" ? f.lookup : null,
         history: typeof f.history === "boolean" ? f.history : null,
+        ask: typeof f.ask === "boolean" ? f.ask : null,
       },
     };
   } catch {
@@ -371,4 +372,47 @@ export function parseDeviceAnswer(p: Record<string, unknown>): {
       }
     : null;
   return { answer, lookup: parseLookup(p.lookup), image: httpsUrl(p.image), scanId };
+}
+
+function timeZone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// "Ask your history". null = route missing (404), so the feature hides.
+export async function askHistory(question: string, language?: string): Promise<AskAnswer | null> {
+  const r = await postJson<Record<string, unknown>>(
+    "/api/ask",
+    { question, ...(language && language !== "English" ? { language } : {}), timeZone: timeZone() },
+    30_000,
+  );
+  if (r.status === 404 || r.status === 405) return null;
+  const d = r.data;
+  if (d && typeof d.spokenText === "string" && d.spokenText.trim()) {
+    return {
+      spokenText: d.spokenText.trim(),
+      sections: cleanSections(d.sections),
+      scans: Array.isArray(d.scans)
+        ? d.scans
+            .filter((x): x is Record<string, unknown> => !!x && typeof x === "object")
+            .filter((x) => typeof x.id === "string" || typeof x.id === "number")
+            .map((x) => ({
+              id: String(x.id),
+              title: typeof x.title === "string" && x.title.trim() ? x.title.trim() : "Untitled scan",
+              createdAt: typeof x.createdAt === "string" ? x.createdAt : "",
+            }))
+        : [],
+      error: d.error === true || !r.ok,
+    };
+  }
+  return {
+    spokenText:
+      r.status === -1 ? "That took too long, so I stopped. Please try again." : "I couldn't reach SightLine's server just now.",
+    sections: [],
+    scans: [],
+    error: true,
+  };
 }

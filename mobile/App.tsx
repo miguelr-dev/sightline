@@ -15,6 +15,7 @@ import { AccessibilityInfo, Alert, AppState, Linking, Platform, Pressable, Style
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   analyze,
+  askHistory,
   clearHistory,
   frameCheck,
   frameCheckExists,
@@ -28,7 +29,7 @@ import {
   transcribe,
 } from "./src/api";
 import { ModeGrid } from "./src/components/ModeGrid";
-import { RecentSheet } from "./src/components/RecentSheet";
+import { RecentSheet, type AskState } from "./src/components/RecentSheet";
 import { ResultSheet } from "./src/components/ResultSheet";
 import { LanguageSheet, SettingsSheet, type Connection } from "./src/components/SettingsSheet";
 import { Icon, IconButton, PillButton } from "./src/components/ui";
@@ -89,6 +90,8 @@ const haptic = {
 type SheetName = "none" | "result" | "settings" | "language" | "recent";
 
 const LOADING_DELAY_MS = 300; // a cached lookup that lands sooner never shows a spinner
+// Spoken questions that are about earlier scans rather than the photo in front of you.
+const HISTORY_QUESTION = /^\s*(what (did|have) i (scan|scanned|see|seen|read)|remind me|earlier|yesterday|last time)\b/i;
 
 function Main() {
   const insets = useSafeAreaInsets();
@@ -98,6 +101,10 @@ function Main() {
   const [historyOn, setHistoryOn] = useState<boolean>(!!demo);
   const [scans, setScans] = useState<Scan[] | null>(demo?.scans ?? null);
   const [scansLoading, setScansLoading] = useState(false);
+  const [askState, setAskState] = useState<AskState>(demo?.ask ?? { status: "idle" });
+  const [askAvailable, setAskAvailable] = useState(true); // false after /api/ask 404s
+  const askId = useRef(0);
+  const voiceTarget = useRef<"photo" | "history" | "main">("photo");
   const [shot, setShot] = useState<Shot | null>(demo?.shot ?? null);
   const [sheet, setSheetState] = useState<SheetName>(demo?.sheet ?? "none");
   const [busy, setBusy] = useState(false);
@@ -204,6 +211,7 @@ function Main() {
   const setSheet = useCallback(
     (next: SheetName) => {
       if (sheetRef.current === "result" && next !== "result") silence();
+      if (sheetRef.current === "recent" && next !== "recent") silence(); // the history answer
       if (sheetRef.current === "settings" && next !== "settings") speech.stop(); // voice sample
       sheetRef.current = next;
       setSheetState(next);
@@ -628,11 +636,27 @@ function Main() {
       return say("I didn't catch that. Please try again.", "en-US", { token });
     }
     if (token !== speakToken.current) return; // sheet closed while transcribing
+    const target = voiceTarget.current;
+    if (target === "photo") return void ask(text);
+    if (target === "history") return void runAsk(text);
+    // Main screen: questions about earlier scans (or any question before there's a photo) go to
+    // "Ask your history"; anything else is a follow-up about the last photo.
+    const hasPhoto = !!shotRef.current?.photo?.base64 && !!shotRef.current.result && !shotRef.current.result.error;
+    if (!hasPhoto || HISTORY_QUESTION.test(text)) {
+      if (!askOn) {
+        haptic.error();
+        return say("Take a photo first, then ask about it.");
+      }
+      void openRecent();
+      return void runAsk(text);
+    }
+    setSheet("result");
     void ask(text);
   };
 
-  const toggleMic = async () => {
+  const toggleMic = async (target: "photo" | "history" | "main" = "photo") => {
     if (recording) return stopRecording();
+    voiceTarget.current = target;
     const perm = await requestRecordingPermissionsAsync();
     if (!perm.granted) {
       haptic.error();
@@ -662,13 +686,52 @@ function Main() {
     setScansLoading(false);
     if (list === null) {
       setScans(null);
-      if (!demo) {
+      if (!demo && !askOn) {
         setHistoryOn(false); // route gone: hide the entry point
         setSheet("none");
       }
       return;
     }
     setScans(list);
+  };
+
+  // ---- ask your history ---------------------------------------------------------------------------
+  const askOn = !!demo || (askAvailable && connection.features.ask !== false && connection.state !== "down");
+
+  async function runAsk(question: string) {
+    silence(); // a new answer replaces whatever was being said
+    const token = speakToken.current;
+    const id = ++askId.current;
+    setAskState({ status: "loading", question });
+    haptic.capture();
+    const answer = await askHistory(question);
+    if (id !== askId.current) return; // a newer question replaced this one
+    if (!answer) {
+      setAskAvailable(false);
+      setAskState({ status: "idle" });
+      say("Asking about your scans isn't available on this server.", "en-US", { token });
+      return;
+    }
+    setAskState({ status: "done", question, answer, id });
+    if (answer.error) haptic.error();
+    else haptic.success();
+    say(answer.spokenText, "en-US", { token });
+  }
+
+  const clearAsk = () => {
+    askId.current++;
+    silence();
+    setAskState({ status: "idle" });
+  };
+
+  const openScanId = async (id: string) => {
+    let scan = scans?.find((x) => x.id === id);
+    if (!scan) scan = (await getHistory(50))?.find((x) => x.id === id);
+    if (scan) openScan(scan);
+    else {
+      haptic.error();
+      say("I couldn't open that scan.");
+    }
   };
 
   const openScan = (scan: Scan) => {
@@ -835,7 +898,7 @@ function Main() {
             </Text>
           </Pressable>
           ) : null}
-          {historyOn ? (
+          {historyOn || askOn ? (
             <IconButton onPress={() => void openRecent()} label="Recent scans" filled={hat ? "surface" : "white"}>
               <Icon sf="clock.arrow.circlepath" ion="time-outline" />
             </IconButton>
@@ -933,7 +996,27 @@ function Main() {
             icon={busy ? undefined : <Icon sf="camera.fill" ion="camera" size={24} color={colors.onPrimary} />}
             style={{ flex: 1 }}
           />
+          {connection.features.transcribe !== false && (askOn || last) && (Platform.OS !== "web" || demo) ? (
+            <IconButton
+              onPress={() => void toggleMic("main")}
+              label={recording ? "Stop and ask" : transcribing ? "Listening back" : "Ask a question"}
+              hint={
+                recording
+                  ? "Stops recording and asks your question"
+                  : "Ask about the last photo, or about your earlier scans"
+              }
+              filled={recording ? "black" : "surface"}
+              size={64}
+            >
+              {recording ? <View style={s.recDot} /> : <Icon sf="mic.fill" ion="mic" size={26} />}
+            </IconButton>
+          ) : null}
         </View>
+        {recording && sheet === "none" ? (
+          <Text style={[type.subhead, { color: colors.record, fontWeight: "600" }]} accessibilityLiveRegion="polite">
+            Listening. Tap the mic again when you're done.
+          </Text>
+        ) : null}
       </View>
       ) : null}
 
@@ -961,7 +1044,7 @@ function Main() {
         onStop={() => speech.stop()}
         onRate={(rate) => update({ rate })}
         onAsk={(q) => void ask(q)}
-        onMic={() => void toggleMic()}
+        onMic={() => void toggleMic("photo")}
         onRetry={retry}
         onLookup={() => shot && void runLookup(shot, false)}
       />
@@ -989,6 +1072,15 @@ function Main() {
         onClose={() => setSheet("none")}
       />
       <RecentSheet
+        askOn={askOn}
+        ask={askState}
+        onAsk={(q) => void runAsk(q)}
+        onClearAsk={clearAsk}
+        onOpenScanId={(id) => void openScanId(id)}
+        canRecord={connection.features.transcribe !== false && Platform.OS !== "web"}
+        recording={recording}
+        transcribing={transcribing}
+        onMic={() => void toggleMic("history")}
         visible={sheet === "recent"}
         scans={scans}
         loading={scansLoading}
@@ -1105,5 +1197,6 @@ const s = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   thumb: { width: 44, height: 44, borderRadius: 10 },
+  recDot: { width: 16, height: 16, borderRadius: 8, backgroundColor: colors.record },
   captureRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 4 },
 });
