@@ -1,0 +1,322 @@
+{
+  "meta": {
+    "disclaimer": "Do not rely on openFDA to make decisions regarding medical care. While we make every effort to ensure that data is accurate, you should assume all results are unvalidated. We may limit or otherwise restrict your access to the API in line with our Terms of Service.",
+    "terms": "https://open.fda.gov/terms/",
+    "license": "https://open.fda.gov/license/",
+    "last_updated": "2026-11-04",
+    "results": {
+      "skip": 0,
+      "limit": 3,
+      "total": 5
+    }
+  },
+  "results": [
+    {
+      "status": "Terminated",
+      "city": "Warren",
+      "state": "NJ",
+      "country": "United States",
+      "classification": "Class II",
+      "openfda": {
+        "application_number": [
+          "NDA020402"
+        ],
+        "brand_name": [
+          "ADVIL"
+        ],
+        "generic_name": [
+          "IBUPROFEN"
+        ],
+        "manufacturer_name": [
+          "Haleon US Holdings LLC"
+        ],
+        "product_ndc": [
+          "0573-0149",
+          "0573-0169",
+          "0573-1769"
+        ],
+        "product_type": [
+          "HUMAN OTC DRUG"
+        ],
+        "route": [
+          "ORAL"
+        ],
+        "substance_name": [
+          "IBUPROFEN"
+        ],
+        "rxcui": [
+          "310964",
+          "731533"
+        ],
+        "spl_id": [
+          "57c53bdc-fb89-a4d9-e063-6294a90a1bfb"
+        ],
+        "spl_set_id": [
+          "1f01c10a-9434-91a4-2ee4-352315a6b610"
+        ],
+        "package_ndc": [
+          "0573-0169-17",
+          "0573-0169-02",
+          "0573-0169-19",
+          "0573-0169-20",
+          "0573-0169-40",
+          "0573-0169-11",
+          "0573-0169-89",
+          "0573-0169-30",
+          "0573-0169-31",
+          "0573-0169-86",
+          "0573-0169-51",
+          "0573-0169-43",
+          "0573-0169-49",
+          "0573-0169-52",
+          "0573-0169-08",
+          "0573-0169-22",
+          "0573-0169-13",
+          "0573-0169-76",
+          "0573-0169-16",
+          "0573-0149-13",
+          "0573-0149-04",
+          "0573-0149-66",
+          "0573-0149-91",
+          "0573-1769-20",
+          "0573-1769-80",
+          "0573-1769-89",
+          "0573-1769-14",
+          "0573-1769-13",
+          "0573-1769-09",
+          "0573-1769-02",
+          "0573-1769-87",
+          "0573-1769-16",
+          "0573-1769-31",
+          "0573-1769-92",
+          "0573-1769-95",
+          "0057317698"
+        ],
+        "is_original_packager": [
+          true
+        ],
+        "nui": [
+          "N0000000160",
+          "M0001335",
+          "N0000175722"
+        ],
+        "pharm_class_moa": [
+          "Cyclooxygenase Inhibitors [MoA]"
+        ],
+        "pharm_class_cs": [
+          "Anti-Inflammatory Agents, Non-Steroidal [CS]"
+        ],
+        "pharm_class_epc": [
+          "Nonsteroidal Anti-inflammatory Drug [EPC]"
+        ],
+        "unii": [
+          "WK2XYI10QM"
+        ]
+      },
+      "product_type": "Drugs",
+      "event_id": "85224",
+      "recalling_firm": "Glaxosmithkline Consumer Healthcare Holdings",
+      "address_1": "184 Liberty Corner Rd",
+      "address_2": "N/A",
+      "postal_code": "07059-6796",
+      "voluntary_mandated": "Voluntary: Firm initiated",
+      "initial_firm_notification": "Letter",
+      "distribution_pattern": "Product was distributed throughout the United States, including Puerto Rico.",
+      "recall_number": "D-1066-2020",
+      "product_description": "Ibuprofen 200 mg liquid filled capsules  Advil Liqui-Gel Minis, 160 count bottle  NDC 0573-1769-89  NDC 0573-1769-95",
+      "product_quantity": "446,628 bottles",
+      "reason_for_recall": "Labeling: Lacks Warning or Rx Legend- Certain lots does not include required safety warning information in the Drug Facts Panel.",
+      "recall_initiation_date": "20200316",
+      "center_classification_date": "20200326",
+      "termination_date": "20211028",
+      "report_date": "20200401",
+      "code_info": "Batch/Lot Numbers:  R53074, exp. date 10/31/2020, item # F00573176989, 160 ct.   R53075, exp. date 10/31/2020, item # F00573176989, 160 ct.   R53076, exp. date 11/30/2020, item # F00573176989, 160 ct.  R53077, exp. date 11/30/2020, item # F00573176989, 160 ct.  R53081, exp. date 11/30/2020, item # F00573176989, 160 ct.  R53901, exp. date 02/28/2021, item # F00573176989, 160 ct.  R53902, exp. date 03/31/2021, item # F00573176989, 160 ct.  R62780, exp. date 06/30/2021, item # F00573176989, 160 ct.",
+      "more_code_info": ""
+    },
+    {
+      "status": "Terminated",
+      "city": "Warren",
+      "state": "NJ",
+      "country": "United States",
+      "classification": "Class II",
+      "openfda": {
+        "application_number": [
+          "NDA022113"
+        ],
+        "brand_name": [
+          "ADVIL ALLERGY AND CONGESTION RELIEF"
+        ],
+        "generic_name": [
+          "CHLORPHENIRAMINE MALEATE, IBUPROFEN, AND PHENYLEPHRINE HYDROCHLORIDE"
+        ],
+        "manufacturer_name": [
+          "Haleon US Holdings LLC"
+        ],
+        "product_ndc": [
+          "0573-0196",
+          "0573-2161"
+        ],
+        "product_type": [
+          "HUMAN OTC DRUG"
+        ],
+        "route": [
+          "ORAL"
+        ],
+        "substance_name": [
+          "CHLORPHENIRAMINE MALEATE",
+          "IBUPROFEN",
+          "PHENYLEPHRINE HYDROCHLORIDE"
+        ],
+        "rxcui": [
+          "1310503"
+        ],
+        "spl_id": [
+          "ac233de1-41cf-4ef0-a7b4-30f395c88c1a"
+        ],
+        "spl_set_id": [
+          "a6cc97d8-252a-4527-a470-6d9e356342fd"
+        ],
+        "package_ndc": [
+          "0573-0196-01",
+          "0573-0196-10",
+          "0573-0196-20",
+          "0573-0196-02",
+          "0573-2161-03",
+          "0057301961",
+          "0057301962"
+        ],
+        "is_original_packager": [
+          true
+        ],
+        "nui": [
+          "N0000000160",
+          "M0001335",
+          "N0000175722"
+        ],
+        "pharm_class_moa": [
+          "Cyclooxygenase Inhibitors [MoA]"
+        ],
+        "pharm_class_cs": [
+          "Anti-Inflammatory Agents, Non-Steroidal [CS]"
+        ],
+        "pharm_class_epc": [
+          "Nonsteroidal Anti-inflammatory Drug [EPC]"
+        ],
+        "unii": [
+          "WK2XYI10QM",
+          "V1Q0O9OJ9Z",
+          "04JA59TNSJ"
+        ]
+      },
+      "product_type": "Drugs",
+      "event_id": "85224",
+      "recalling_firm": "Glaxosmithkline Consumer Healthcare Holdings",
+      "address_1": "184 Liberty Corner Rd",
+      "address_2": "N/A",
+      "postal_code": "07059-6796",
+      "voluntary_mandated": "Voluntary: Firm initiated",
+      "initial_firm_notification": "Letter",
+      "distribution_pattern": "Product was distributed throughout the United States, including Puerto Rico.",
+      "recall_number": "D-1065-2020",
+      "product_description": "Ibuprofen 200 mg Chlorpheniramine Maleate 4mg Phenylephrine 10 mg tablets.  Advil Allergy & Congestion Relief  10 and 20 count blister tray in carton   NDC 0573-0196-10, item # F00573019610C, 10 ct. blister  NDC 0573-0196-20, item # F00573019620C, 20 ct. blister  NDC 0573-0196-10, item # F00573019610R, 10 ct. blister",
+      "product_quantity": "471,024 blisters",
+      "reason_for_recall": "Labeling: Lacks Warning or Rx Legend- Certain lots does not include required safety warning information in the Drug Facts Panel.",
+      "recall_initiation_date": "20200316",
+      "center_classification_date": "20200326",
+      "termination_date": "20211028",
+      "report_date": "20200401",
+      "code_info": "Batch/Lot Numbers:  R73995, exp. date 07/31/2021  R53915, exp. date 05/31/2020  9324HA, exp. date 07/31/2021  9327HA, exp. date 07/31/2021",
+      "more_code_info": ""
+    },
+    {
+      "status": "Terminated",
+      "city": "Warren",
+      "state": "NJ",
+      "country": "United States",
+      "classification": "Class II",
+      "openfda": {
+        "application_number": [
+          "NDA020812"
+        ],
+        "brand_name": [
+          "INFANTS ADVIL"
+        ],
+        "generic_name": [
+          "IBUPROFEN"
+        ],
+        "manufacturer_name": [
+          "Haleon US Holdings LLC"
+        ],
+        "product_ndc": [
+          "0573-0191"
+        ],
+        "product_type": [
+          "HUMAN OTC DRUG"
+        ],
+        "route": [
+          "ORAL"
+        ],
+        "substance_name": [
+          "IBUPROFEN"
+        ],
+        "rxcui": [
+          "204442",
+          "731531"
+        ],
+        "spl_id": [
+          "9f156faa-6bf8-483c-837d-050e40ec0cc5"
+        ],
+        "spl_set_id": [
+          "db5ed801-7a7e-3c83-0172-77f914daaa5a"
+        ],
+        "package_ndc": [
+          "0573-0191-20",
+          "0573-0191-50",
+          "0573-0191-22",
+          "0573-0191-75",
+          "0057301917",
+          "0057301915"
+        ],
+        "is_original_packager": [
+          true
+        ],
+        "nui": [
+          "N0000000160",
+          "M0001335",
+          "N0000175722"
+        ],
+        "pharm_class_moa": [
+          "Cyclooxygenase Inhibitors [MoA]"
+        ],
+        "pharm_class_cs": [
+          "Anti-Inflammatory Agents, Non-Steroidal [CS]"
+        ],
+        "pharm_class_epc": [
+          "Nonsteroidal Anti-inflammatory Drug [EPC]"
+        ],
+        "unii": [
+          "WK2XYI10QM"
+        ]
+      },
+      "product_type": "Drugs",
+      "event_id": "85224",
+      "recalling_firm": "Glaxosmithkline Consumer Healthcare Holdings",
+      "address_1": "184 Liberty Corner Rd",
+      "address_2": "N/A",
+      "postal_code": "07059-6796",
+      "voluntary_mandated": "Voluntary: Firm initiated",
+      "initial_firm_notification": "Letter",
+      "distribution_pattern": "Product was distributed throughout the United States, including Puerto Rico.",
+      "recall_number": "D-1067-2020",
+      "product_description": "Ibuprofen 50 mg per 1.25 mL Oral Suspension  Advil Infant Concentrated Drops White Grape  0.75 oz. and 1 oz. bottles  NDC 0573-0191-75 (0.75 oz.)  NDC 0573-0191-50 (1 oz.)",
+      "product_quantity": "151,056 bottles",
+      "reason_for_recall": "Labeling: Lacks Warning or Rx Legend- Certain lots does not include required safety warning information in the Drug Facts Panel.",
+      "recall_initiation_date": "20200316",
+      "center_classification_date": "20200326",
+      "termination_date": "20211028",
+      "report_date": "20200401",
+      "code_info": "Batch/Lot #   R73761, exp. date 01/31/2021, Item # F00573019175, 0.75 oz.   R74936, exp. date 02/28/2021, Item # F00573019175, 0.75 oz.  R56290, exp. date 03/31/2020, Item # F00573019150, 1 oz.  R60959, exp. date 02/28/2021, Item # F00573019150, 1 oz.   R78826, exp. date 11/30/2021, Item # F00573019150, 1 oz.   9335UA, exp. date 01/31/2021, item # F00573019175A - Co-package  9336UA, exp. date 02/28/2021, item # F00573019175A - Co-package",
+      "more_code_info": ""
+    }
+  ]
+}

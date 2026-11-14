@@ -204,6 +204,7 @@ export type FrameCheckResponse = {
   suggestedMode?: Mode; // best mode for the target
   confidence?: number; // 0 to 1, how sure the model is about `ready`
   hint?: string; // one short spoken framing tip when detected but not ready; otherwise empty
+  box?: { x: number; y: number; w: number; h: number }; // where the item is, 0-1 of the frame
 };
 
 export type Voice = { id: string; name: string; description?: string; previewUrl?: string };

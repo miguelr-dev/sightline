@@ -28,6 +28,7 @@ vi.mock("@/lib/claude", async (importOriginal) => {
 });
 
 import { GET } from "@/app/api/barcode/route";
+import { barcodeCacheKey } from "@/lib/barcode";
 import * as db from "@/lib/db";
 import { searchWeb } from "@/lib/brightdata";
 import { askJson } from "@/lib/claude";
@@ -37,21 +38,33 @@ const fixture = (name: string) =>
 
 // The network, by URL: Open Food Facts knows the soda; openFDA knows the Tylenol UPC.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- init is read from mock.calls
-const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+const routeByUrl = async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = String(input);
   const json = (body: string, status = 200) =>
     new Response(body, { status, headers: { "content-type": "application/json" } });
   if (url.includes("openfoodfacts.org")) {
-    return url.includes("049000028911") ? json(fixture("off-soda")) : json(fixture("off-missing"));
+    if (url.includes("049000028911")) return json(fixture("off-soda"));
+    if (url.includes("305730150309")) return json(fixture("off-advil"));
+    if (url.includes("0123456789012")) {
+      // An OTC medicine without a drug-UPC prefix (e.g. a store listing).
+      return json(JSON.stringify({ status: 1, product: { product_name: "Tylenol Extra Strength caplets", brands: "Tylenol" } }));
+    }
+    return json(fixture("off-missing"));
   }
   if (url.includes("api.fda.gov/drug/label")) {
-    return url.includes("300450406026")
-      ? json(fixture("fda-label-tylenol"))
-      : json('{"error":{"code":"NOT_FOUND"}}', 404);
+    const u = decodeURIComponent(url);
+    if (u.includes("300450406026") || u.includes('brand_name.exact:"Tylenol"')) return json(fixture("fda-label-tylenol"));
+    if (u.includes('brand_name.exact:"Advil"')) return json(fixture("fda-label-advil"));
+    return json('{"error":{"code":"NOT_FOUND"}}', 404);
   }
-  if (url.includes("api.fda.gov/drug/enforcement")) return json(fixture("fda-enforcement-tylenol"));
+  if (url.includes("api.fda.gov/drug/enforcement")) {
+    return decodeURIComponent(url).includes("Advil")
+      ? json(fixture("fda-enforcement-advil"))
+      : json(fixture("fda-enforcement-tylenol"));
+  }
   return json('{"error":{"code":"NOT_FOUND"}}', 404);
-});
+};
+const fetchMock = vi.fn(routeByUrl);
 
 function barcode(code: string, headers: Record<string, string> = {}) {
   return GET(new Request(`http://localhost:3000/api/barcode?code=${code}`, { headers }));
@@ -65,6 +78,7 @@ describe("GET /api/barcode", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     bg.pending.length = 0;
+    fetchMock.mockImplementation(routeByUrl);
     vi.stubGlobal("fetch", fetchMock);
     // clearAllMocks keeps per-test return values; reset the ones tests override.
     vi.mocked(searchWeb).mockResolvedValue({ results: [] });
@@ -128,25 +142,49 @@ describe("GET /api/barcode", () => {
     });
   });
 
-  it("falls through when Open Food Facts can't be reached", async () => {
-    fetchMock.mockImplementationOnce(async () => {
-      throw new Error("timeout");
+  it("a drug UPC found in Open Food Facts still gets openFDA (Advil)", async () => {
+    const body = await (await barcode("305730150309")).json();
+    expect(body).toMatchObject({ found: true, source: "openfda", itemKind: "medicine", title: "Advil" });
+    expect(body.spokenText.toLowerCase()).toContain("ibuprofen");
+    expect(body.spokenText).toContain("No recalls found.");
+  });
+
+  it("an OTC medicine without the drug prefix is checked against openFDA by brand, recall first", async () => {
+    const body = await (await barcode("0123456789012")).json();
+    expect(body).toMatchObject({ found: true, source: "openfda", itemKind: "medicine" });
+    expect(body.sections[0].title).toBe("Recalls");
+  });
+
+  it("falls through to the web when Open Food Facts can't be reached", async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input).includes("openfoodfacts.org")) throw new Error("timeout");
+      return new Response('{"error":{"code":"NOT_FOUND"}}', { status: 404 });
     });
-    const body = await (await barcode("300450406026")).json();
-    expect(body.source).toBe("openfda");
+    vi.mocked(searchWeb).mockResolvedValue({
+      results: [{ title: "Acme Widget", url: "https://example.com/w", snippet: "UPC 012345678905" }],
+    });
+    vi.mocked(askJson).mockResolvedValue({
+      found: true,
+      title: "Acme Widget",
+      itemKind: "product",
+      spokenText: "Acme Widget.",
+      sections: [],
+    });
+    const body = await (await barcode("012345678905")).json();
+    expect(body.source).toBe("web");
   });
 
   it("caches results by code (found and not found)", async () => {
     await barcode("049000028911");
     await drain();
     expect(db.putCachedBarcode).toHaveBeenCalledWith(
-      "00049000028911",
+      barcodeCacheKey("049000028911", "English"),
       expect.objectContaining({ found: true, source: "openfoodfacts" }),
     );
     await barcode("012345678905");
     await drain();
     expect(db.putCachedBarcode).toHaveBeenCalledWith(
-      "00012345678905",
+      barcodeCacheKey("012345678905", "English"),
       expect.objectContaining({ found: false }),
     );
   });

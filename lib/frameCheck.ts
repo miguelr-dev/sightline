@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { type FrameCheckResponse, type Mode } from "@/lib/modes";
 import { askJson, fastModel } from "@/lib/claude";
 import { imageMediaType } from "@/lib/http";
-import { matchKey, sameTarget } from "@/lib/hat";
+import { GENERIC_WORDS } from "@/lib/hat";
 
 // Server-only. Auto-capture check, used by /api/frame-check (phone) and /api/device/frame (hat): is a readable target in view (detected, for a
 // "Menu detected, tap to read" card), and can its main text be read right now (ready, to
@@ -40,8 +40,19 @@ const SCHEMA = {
     confidence: { type: "number" },
     key: { type: "string" },
     hint: { type: "string" },
+    box: {
+      type: "object",
+      properties: {
+        x: { type: "number" },
+        y: { type: "number" },
+        w: { type: "number" },
+        h: { type: "number" },
+      },
+      required: ["x", "y", "w", "h"],
+      additionalProperties: false,
+    },
   },
-  required: ["detected", "label", "category", "ready", "confidence", "key", "hint"],
+  required: ["detected", "label", "category", "ready", "confidence", "key", "hint", "box"],
   additionalProperties: false,
 } as const;
 
@@ -84,10 +95,47 @@ export function normalizeKey(raw: string): string {
 
 /** If `key` names the same item as the last frame's key (they share a distinctive word, as in
  *  lib/hat.ts), keep the last key so the phone sees one stable id. */
+export type Box = { x: number; y: number; w: number; h: number };
+
+/** The model's box, clamped to the frame (0-1, 3 decimals). Undefined if it's missing, not
+ *  numbers, or too small to be a real item (the model gives zeros when it isn't sure). */
+export function cleanBox(raw: unknown): Box | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const b = raw as Record<string, unknown>;
+  const n = [b.x, b.y, b.w, b.h];
+  if (!n.every((v) => typeof v === "number" && Number.isFinite(v))) return undefined;
+  const r3 = (v: number) => Math.round(v * 1000) / 1000;
+  const x = Math.min(1, Math.max(0, b.x as number));
+  const y = Math.min(1, Math.max(0, b.y as number));
+  const w = Math.min(1 - x, Math.max(0, (b.w as number) + Math.min(0, b.x as number)));
+  const h = Math.min(1 - y, Math.max(0, (b.h as number) + Math.min(0, b.y as number)));
+  if (w < 0.02 || h < 0.02) return undefined;
+  return { x: r3(x), y: r3(y), w: r3(w), h: r3(h) };
+}
+
 export function stabilizeKey(key: string, lastKey: string | undefined): string {
   if (!key || !lastKey) return key;
   const last = normalizeKey(lastKey);
-  return last && sameTarget(matchKey(key), matchKey(last)) ? last : key;
+  return last && sameProduct(key, last) ? last : key;
+}
+
+/** A key's distinctive words, in order (brand first): no generic product words. */
+function distinctive(key: string): string[] {
+  return normalizeKey(key)
+    .split("-")
+    .filter((w) => w.length >= 2 && !GENERIC_WORDS.has(w));
+}
+
+/** Same product: the same brand word, or 2+ shared distinctive words, or Jaccard >= 0.5.
+ *  Sharing only "cookies" or "energy" isn't enough (Oreo is not Nutter Butter). */
+function sameProduct(a: string, b: string): boolean {
+  const A = distinctive(a);
+  const B = distinctive(b);
+  if (!A.length || !B.length) return false;
+  if (A[0] === B[0]) return true;
+  const shared = A.filter((w) => B.includes(w)).length;
+  if (shared >= 2) return true;
+  return shared / new Set([...A, ...B]).size >= 0.5;
 }
 
 // Everyday tech and furniture: never a target, even if the model calls it one.
@@ -137,7 +185,8 @@ key: the item's brand and product in lowercase, hyphenated, at most 4 words, the
 The previous frame showed "${last.label || last.key}" with key "${last.key}". If this frame shows the same item, return exactly "${last.key}" as the key.`
       : ""
   }
-hint: if not ready, one spoken tip of 2 to 5 words, e.g. "Move back a little", "Tilt down", "Hold still", "Too dark". Say "Too dark" if the frame is too dark to see anything. Empty if ready, or if the view is clear but has nothing to read (an empty wall).`;
+hint: if not ready, one spoken tip of 2 to 5 words, e.g. "Move back a little", "Tilt down", "Hold still", "Too dark". Say "Too dark" if the frame is too dark to see anything. Empty if ready, or if the view is clear but has nothing to read (an empty wall).
+box: where the detected item is in the frame, as fractions of the frame from 0 to 1: x and y are its top-left corner, w and h its width and height. Cover the whole item (the package, the menu page, the sign). All zeros if nothing is detected or you aren't sure.`;
 }
 
 function slug(v: unknown): string {
@@ -173,6 +222,7 @@ export async function checkFrame(
       confidence?: unknown;
       key?: unknown;
       hint?: unknown;
+      box?: unknown;
     }>(new Anthropic(), {
       model: fastModel(),
       maxTokens: 160,
@@ -203,6 +253,7 @@ export async function checkFrame(
     const label =
       detected && typeof parsed?.label === "string" ? parsed.label.trim().slice(0, 60) : "";
     const suggestedMode = category !== "none" ? CATEGORY_MODE[category] : undefined;
+    const box = detected ? cleanBox(parsed?.box) : undefined;
     const confidence =
       typeof parsed?.confidence === "number"
         ? Math.round(Math.min(1, Math.max(0, parsed.confidence)) * 100) / 100
@@ -215,6 +266,7 @@ export async function checkFrame(
       ...(label ? { label } : {}),
       ...(detected && suggestedMode ? { suggestedMode } : {}),
       ...(confidence !== undefined ? { confidence } : {}),
+      ...(detected && box ? { box } : {}),
       hint,
     };
     // One line per frame so the phone's results can be watched live. No image data.

@@ -57,3 +57,40 @@ describe("systemPrompt rules (audit round)", () => {
     expect(PROMPT_VERSION).not.toBe("2026-11-14.3");
   });
 });
+
+describe("systemPrompt rules (QA round)", () => {
+  it("Read never translates and keeps the original language", () => {
+    const p = systemPrompt("read", "English");
+    expect(p).toMatch(/never translate/i);
+    expect(p).toMatch(/in the language it's printed in/i);
+  });
+
+  it("Read with no text says so in a few words, without describing", () => {
+    const p = systemPrompt("read", "English");
+    expect(p).toContain('"No readable text"');
+    expect(p).toMatch(/at most 8 words/);
+  });
+
+  it("never guesses numbers, dates, doses or counts that can't be read", () => {
+    for (const mode of ["read", "describe", "menu", "translate", "auto"] as const) {
+      const p = systemPrompt(mode, "English");
+      expect(p).toMatch(/never state a number, date, dose or count you can't read clearly/i);
+      expect(p).toContain("the date is cut off");
+    }
+  });
+
+  it("doesn't hedge a guess: an uncertain digit means that part isn't readable", () => {
+    const p = systemPrompt("menu", "English");
+    expect(p).toMatch(/if any digit is uncertain/i);
+    expect(p).toContain("as far as the print shows");
+  });
+
+  it("always lists visible warnings in sections", () => {
+    expect(systemPrompt("menu", "English")).toMatch(/every warning you can see[^.]*sections/i);
+  });
+
+  it("bumps the prompt version", () => {
+    expect(PROMPT_VERSION).not.toBe("2026-11-14.8");
+    expect(PROMPT_VERSION).not.toBe("2026-11-14.9");
+  });
+});

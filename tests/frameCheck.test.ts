@@ -7,6 +7,7 @@ vi.mock("@/lib/claude", async (importOriginal) => {
 
 import {
   CATEGORY_MODE,
+  cleanBox,
   checkFrame,
   incidentalKey,
   normalizeKey,
@@ -35,6 +36,15 @@ describe("stabilizeKey: a near-match maps back to the last key", () => {
     ["kirkland-energy-drink", "kirkland-tropical-energy-drink", "kirkland-tropical-energy-drink"],
     ["tropical-energy", "kirkland-tropical-energy-drink", "kirkland-tropical-energy-drink"],
     ["red-bull", "kirkland-tropical-energy-drink", "red-bull"],
+    // Different products that only share a generic word stay different (QA #4).
+    ["oreo-cookies", "nutter-butter-cookies", "oreo-cookies"],
+    ["monster-energy-drink", "red-bull-energy-drink", "monster-energy-drink"],
+    ["doritos-chips", "lays-chips", "doritos-chips"],
+    ["pain-reliever", "demo-prin-pain-reliever", "pain-reliever"],
+    // The same product named differently still maps back.
+    ["red-bull", "red-bull-energy-drink", "red-bull-energy-drink"],
+    ["advil-ibuprofen-tablets", "advil", "advil"],
+    ["kirkland-energy-drink-can", "kirkland-tropical-energy-drink", "kirkland-tropical-energy-drink"],
     ["red-bull", "", "red-bull"],
     ["", "red-bull", ""],
   ])("%s with last %s -> %s", (key, last, expected) => {
@@ -52,6 +62,20 @@ describe("suggestedMode comes from the category, in code", () => {
     ["scene", "describe"],
   ] as const)("%s -> %s", (category, mode) => {
     expect(CATEGORY_MODE[category]).toBe(mode);
+  });
+});
+
+describe("box: where the detected item is in the frame (0-1)", () => {
+  it.each([
+    [{ x: 0.1, y: 0.2, w: 0.5, h: 0.6 }, { x: 0.1, y: 0.2, w: 0.5, h: 0.6 }],
+    [{ x: -0.1, y: 0.2, w: 1.3, h: 0.5 }, { x: 0, y: 0.2, w: 1, h: 0.5 }],
+    [{ x: 0.7, y: 0.9, w: 0.6, h: 0.5 }, { x: 0.7, y: 0.9, w: 0.3, h: 0.1 }],
+    [{ x: 0.2, y: 0.2, w: 0, h: 0 }, undefined],
+    [{ x: 0.2, y: 0.2, w: 0.01, h: 0.5 }, undefined],
+    [{ x: "a", y: 0, w: 1, h: 1 }, undefined],
+    [null, undefined],
+  ])("%j -> %j", (raw, expected) => {
+    expect(cleanBox(raw)).toEqual(expected);
   });
 });
 
@@ -122,6 +146,25 @@ describe("checkFrame", () => {
     model({ detected: false, ready: false, category: "scene", key: "", label: "" });
     const { result } = await checkFrame("/9j/abc", "read");
     expect(result.detected).toBe(false);
+  });
+
+  it("returns a clamped box for a detected item", async () => {
+    model({ box: { x: 0.05, y: 0.1, w: 1.2, h: 0.8 } });
+    const { result } = await checkFrame("/9j/abc", "read");
+    expect(result.box).toEqual({ x: 0.05, y: 0.1, w: 0.95, h: 0.8 });
+  });
+
+  it("no box when nothing is detected", async () => {
+    model({ detected: false, ready: false, category: "scene", key: "", label: "", box: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 } });
+    const { result } = await checkFrame("/9j/abc", "read");
+    expect(result.box).toBeUndefined();
+  });
+
+  it("asks the model for a box in the schema", async () => {
+    model({});
+    await checkFrame("/9j/abc", "read");
+    const schema = vi.mocked(askJson).mock.calls[0][1].schema as { properties: Record<string, unknown> };
+    expect(schema.properties.box).toBeDefined();
   });
 
   it("logs the last key on the frame-check line", async () => {

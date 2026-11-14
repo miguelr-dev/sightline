@@ -50,6 +50,14 @@ export function validBarcode(raw: unknown): string | null {
   return checkDigitOk(code) ? code : null;
 }
 
+/** Bump when how answers are built changes, so cached answers from older code aren't reused. */
+export const BARCODE_VERSION = "b3";
+
+/** The cache key: GTIN-14 (so 12- and 13-digit forms share it), language and version. */
+export function barcodeCacheKey(code: string, language: string): string {
+  return `${gtin14(code)}:${language === "English" ? "" : `${language}:`}${BARCODE_VERSION}`;
+}
+
 /** Padded to 14 digits, so "049000028911" and "0049000028911" are the same product. */
 export function gtin14(code: string): string {
   return code.padStart(14, "0");
@@ -143,6 +151,136 @@ const NOVA: Record<number, string> = {
   4: "ultra-processed",
 };
 
+// ---------- Sizes and serving sanity ----------
+
+const TO_BASE: Record<string, { base: "ml" | "g"; factor: number }> = {
+  "fl oz": { base: "ml", factor: 29.5735 },
+  ml: { base: "ml", factor: 1 },
+  cl: { base: "ml", factor: 10 },
+  l: { base: "ml", factor: 1000 },
+  oz: { base: "g", factor: 28.3495 },
+  g: { base: "g", factor: 1 },
+  kg: { base: "g", factor: 1000 },
+  lb: { base: "g", factor: 453.592 },
+};
+
+type Amount = { value: number; unit: string; base: "ml" | "g"; inBase: number };
+
+/** The first amount in a size string: "144 fl oz", "1 can (354.9 mL)", "16 oz (453 g)". */
+function parseAmount(s: string): Amount | undefined {
+  const m = /(\d+(?:[.,]\d+)?)\s*(fl\.?\s*oz|ml|cl|l|kg|g|oz|lb)\b/i.exec(s);
+  if (!m) return undefined;
+  const unit = m[2].toLowerCase().replace(/fl\.?\s*oz/, "fl oz");
+  const value = Number(m[1].replace(",", "."));
+  const conv = TO_BASE[unit];
+  return conv ? { value, unit, base: conv.base, inBase: value * conv.factor } : undefined;
+}
+
+/** The size to say: the quantity without the ℮ sign, or "12-pack of 12 fl oz" when the
+ *  quantity is clearly a whole number of single-container servings ("1 can (354.9 mL)"). */
+function unitSize(quantityRaw: string, servingRaw: string): string {
+  const quantity = quantityRaw.replace(/\s*(℮|\be\b)\s*$/u, "").trim();
+  if (
+    !/^\s*1\s+(can|bottle|pack|packet|bag|bar|pouch|box|cup|carton|jar|container|piece)s?\b/i.test(
+      servingRaw,
+    )
+  ) {
+    return quantity;
+  }
+  const q = parseAmount(quantity);
+  const inParens = /\(([^)]*)\)/.exec(servingRaw)?.[1] ?? servingRaw;
+  const s = parseAmount(inParens);
+  if (!q || !s || q.base !== s.base || s.inBase <= 0) return quantity;
+  const n = q.inBase / s.inBase;
+  const whole = Math.round(n);
+  if (whole < 2 || Math.abs(n - whole) > 0.05 * n) return quantity;
+  const each = Math.round((q.value / whole) * 10) / 10;
+  return `${whole}-pack of ${each} ${q.unit}`;
+}
+
+// Categories where a serving really can weigh under 5 g (mints, gum, spices, sweeteners).
+const SMALL_SERVING =
+  /en:(confectioneries|candies|chewing-gum|mints|sweeteners|spices|condiments|sauces|seasonings|teas|coffees)/;
+
+/** Per-serving data that can't be right: a solid serving under 5 g, more than 9.5 kcal per
+ *  gram, or numbers that disagree with the per-100 g figures. */
+function servingLooksWrong(p: Record<string, unknown>, n: Nutriments): boolean {
+  const serving = parseAmount(str(p.serving_size));
+  if (!serving || serving.base !== "g") return false;
+  const grams = serving.inBase;
+  const cats = Array.isArray(p.categories_tags) ? p.categories_tags.join(" ") : "";
+  if (grams < 5 && !SMALL_SERVING.test(cats)) return true;
+  const kcal = num(n["energy-kcal_serving"]);
+  const kcal100 = num(n["energy-kcal_100g"]);
+  if (kcal !== undefined && kcal > grams * 9.5) return true;
+  if (kcal !== undefined && kcal100 !== undefined) {
+    const expected = (kcal100 * grams) / 100;
+    if (Math.abs(kcal - expected) > 0.35 * Math.max(kcal, expected, 20)) return true;
+  }
+  return false;
+}
+
+// ---------- Medicine detection ----------
+
+const OTC_BRANDS = new Set([
+  "tylenol",
+  "advil",
+  "motrin",
+  "aleve",
+  "bayer",
+  "excedrin",
+  "benadryl",
+  "claritin",
+  "zyrtec",
+  "allegra",
+  "nyquil",
+  "dayquil",
+  "mucinex",
+  "robitussin",
+  "sudafed",
+  "tums",
+  "pepto",
+  "imodium",
+  "pepcid",
+  "prilosec",
+  "nexium",
+  "midol",
+  "dramamine",
+  "flonase",
+  "theraflu",
+  "vicks",
+  "zicam",
+  "aspirin",
+  "ibuprofen",
+  "acetaminophen",
+  "naproxen",
+  "loratadine",
+  "cetirizine",
+  "melatonin",
+]);
+
+/** The product looks like a medicine or supplement (by category, name, form or brand). */
+export function looksLikeMedicine(p: Record<string, unknown>): boolean {
+  const cats = Array.isArray(p.categories_tags) ? p.categories_tags.join(" ") : "";
+  if (
+    /en:(medicines|drugs|pharmaceuticals|dietary-supplements|food-supplements|vitamins|analgesics)/.test(
+      cats,
+    )
+  ) {
+    return true;
+  }
+  const text = `${str(p.product_name)} ${str(p.brands)}`.toLowerCase();
+  if (/\b(tablets?|caplets?|capsules?|softgels?|gelcaps?|lozenges?)\b/.test(text)) return true;
+  return text.split(/[^a-z]+/).some((w) => OTC_BRANDS.has(w));
+}
+
+/** The brand to look up in openFDA: the listed brand, or the name's words before any digit. */
+function brandCandidate(p: Record<string, unknown>): string {
+  const brand = str(p.brands).split(",")[0]?.trim();
+  if (brand) return brand;
+  return str(p.product_name).split(/\s+\d/)[0].split(/\s+/).slice(0, 2).join(" ").trim();
+}
+
 /** A product from the Open Food Facts v2 product API, or null if it isn't there. */
 export function fromOpenFoodFacts(json: unknown): BarcodeResult | null {
   const j = json as { status?: unknown; product?: Record<string, unknown> } | null;
@@ -152,20 +290,25 @@ export function fromOpenFoodFacts(json: unknown): BarcodeResult | null {
 
   const brand = str(p.brands).split(",")[0]?.trim() ?? "";
   const name = tidyName(firstWords(str(p.product_name) || brand || "Unnamed product", 8));
-  const size = str(p.quantity);
+  const size = unitSize(str(p.quantity), str(p.serving_size));
   const ingredients = str(p.ingredients_text_en) || str(p.ingredients_text);
   const contains = allergenNames(p.allergens_tags);
   const traces = allergenNames(p.traces_tags).filter((t) => !contains.includes(t));
 
-  // Per serving when the label gives it, otherwise per 100 g.
-  const perServing = ["energy-kcal", "fat", "sugars", "sodium", "proteins"].some(
+  // Per serving when the label gives it and it's plausible, otherwise per 100 g.
+  const hasServing = ["energy-kcal", "fat", "sugars", "sodium", "proteins"].some(
     (k) => num(nutriments[`${k}_serving`]) !== undefined,
   );
+  const servingWrong = hasServing && servingLooksWrong(p, nutriments);
+  const perServing = hasServing && !servingWrong;
   const suffix = perServing ? "_serving" : "_100g";
   const value = (key: string) => num(nutriments[key + suffix]);
 
   const sections: Section[] = [];
   const nutritionLines: string[] = [];
+  if (servingWrong) {
+    nutritionLines.push("The per-serving numbers on file looked wrong, so these are per 100 g.");
+  }
   if (perServing && str(p.serving_size)) nutritionLines.push(`Serving: ${str(p.serving_size)}`);
   for (const n of NUTRIENTS) {
     const v = value(n.key);
@@ -210,7 +353,7 @@ export function fromOpenFoodFacts(json: unknown): BarcodeResult | null {
   const caffeine = value("caffeine");
   const per = perServing ? "per serving" : "per 100 grams";
   const headline = [
-    sugar !== undefined ? `${grams(sugar)} grams of sugar` : "",
+    sugar !== undefined ? `${grams(sugar)} gram${grams(sugar) === "1" ? "" : "s"} of sugar` : "",
     caffeine !== undefined && caffeine > 0
       ? `${Math.round(caffeine * 1000)} milligrams of caffeine`
       : "",
@@ -229,14 +372,18 @@ export function fromOpenFoodFacts(json: unknown): BarcodeResult | null {
   };
 }
 
-async function fetchOpenFoodFacts(code: string): Promise<BarcodeResult | null> {
+async function fetchOpenFoodFacts(
+  code: string,
+): Promise<{ result: BarcodeResult; product: Record<string, unknown> } | null> {
   const url = `https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=${OFF_FIELDS}`;
   const res = await fetch(url, {
     headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
     signal: AbortSignal.timeout(OFF_TIMEOUT_MS),
   });
   if (!res.ok && res.status !== 404) return null;
-  return fromOpenFoodFacts(await res.json().catch(() => null));
+  const json = (await res.json().catch(() => null)) as { product?: Record<string, unknown> } | null;
+  const result = fromOpenFoodFacts(json);
+  return result && json?.product ? { result, product: json.product } : null;
 }
 
 // ---------- openFDA ----------
@@ -352,6 +499,11 @@ async function fdaJson(path: string): Promise<{ results?: unknown[] } | null> {
   return (await res.json().catch(() => null)) as { results?: unknown[] } | null;
 }
 
+/** NDC directory strengths are "per unit": "200 mg/1" means 200 mg per tablet. */
+export function ndcStrength(raw: string): string {
+  return raw.replace(/\s*\/\s*1\s*$/, "").trim();
+}
+
 /** The 10-digit NDC inside a drug UPC, in the three ways it can be split. */
 function ndcVariants(upc: string): string[] {
   const d = upc.slice(1, 11);
@@ -393,7 +545,7 @@ async function fetchOpenFda(code: string): Promise<BarcodeResult | null> {
         brand_name: ndc.brand_name ? [ndc.brand_name] : undefined,
         generic_name: ndc.generic_name ? [ndc.generic_name] : undefined,
       },
-      active_ingredient: ai?.name ? [`${ai.name} ${ai.strength ?? ""}`.trim()] : undefined,
+      active_ingredient: ai?.name ? [`${ai.name} ${ndcStrength(ai.strength ?? "")}`.trim()] : undefined,
     };
   }
 
@@ -473,10 +625,42 @@ export function notFound(): BarcodeResult {
 }
 
 /** Open Food Facts, then openFDA for drug UPCs, then the web. Never throws. */
+/** A medicine Open Food Facts knows by name: its openFDA label and recalls, by exact brand. */
+async function openFdaByBrand(brand: string): Promise<BarcodeResult | null> {
+  const q = (s: string) => encodeURIComponent(s);
+  for (const b of [...new Set([brand, brand.toUpperCase()])]) {
+    const label = (
+      await fdaJson(`label.json?search=openfda.brand_name.exact:${q(`"${b}"`)}&limit=1`).catch(
+        () => null,
+      )
+    )?.results?.[0] as FdaLabel | undefined;
+    if (!label) continue;
+    const recalls = ((
+      await fdaJson(
+        `enforcement.json?search=openfda.brand_name:${q(`"${b}"`)}&sort=report_date:desc&limit=5`,
+      ).catch(() => null)
+    )?.results ?? []) as FdaRecall[];
+    return fromOpenFda(label, recalls);
+  }
+  return null;
+}
+
+/** Open Food Facts, but a medicine it lists is also checked against openFDA (uses, recalls). */
+async function fromFoodFactsOrFda(code: string): Promise<BarcodeResult | null> {
+  const off = await fetchOpenFoodFacts(code);
+  if (!off) return null;
+  if (!looksLikeMedicine(off.product)) return off.result;
+  const brand = brandCandidate(off.product);
+  const fda = brand ? await openFdaByBrand(brand).catch(() => null) : null;
+  if (fda) return { ...fda, ...(off.result.image ? { image: off.result.image } : {}) };
+  return { ...off.result, itemKind: "medicine" };
+}
+
 export async function lookupBarcode(code: string): Promise<BarcodeResult> {
+  // Drug UPCs go to openFDA first, so a medicine isn't answered as food (QA: Advil).
   const sources: (() => Promise<BarcodeResult | null>)[] = [
-    () => fetchOpenFoodFacts(code),
     ...(isDrugUpc(code) ? [() => fetchOpenFda(code)] : []),
+    () => fromFoodFactsOrFda(code),
     () => fetchFromWeb(code),
   ];
   for (const source of sources) {

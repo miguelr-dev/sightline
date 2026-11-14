@@ -3,13 +3,15 @@
 // (same headers, raw JPEG body, one frame about every 1.5 s, x-device-button on demand).
 // Use it to test the pipeline without the board, or as the demo fallback if the board fails.
 //
-//   npm run sim                                  # cycle through public/demo/*.jpg
-//   npm run sim -- --image public/demo/menu.jpg  # one picture, over and over
-//   npm run sim -- --webcam                      # the Mac's camera (needs ffmpeg)
-//   npm run sim -- --button                      # press "BOOT" on the first frame (read now)
-//   npm run sim -- --watch                       # also poll /api/device/next and print answers
+//   npm run sim -- --hat sim-01                                  # cycle through public/demo/*.jpg
+//   npm run sim -- --hat sim-01 --image public/demo/menu.jpg     # one picture, over and over
+//   npm run sim -- --hat sim-01 --webcam                         # the Mac's camera (needs ffmpeg)
+//   npm run sim -- --hat sim-01 --button                         # press "BOOT" on the first frame
+//   npm run sim -- --hat sim-01 --watch                          # also poll /api/device/next
+//   npm run sim -- --help
 //
-// Options: --url http://localhost:3000  --device hat-01  --interval 1500  --frames N
+// --hat is required (no default), so the sim can't stream into a real, paired hat by accident.
+// Options: --url http://localhost:3000  --hat <id> (alias --device)  --interval 1500  --frames N
 //          --hold N (frames per still image, default 4)  --camera 0 (avfoundation index)
 // While it runs, press Enter to send the next frame with x-device-button: 1.
 // DEVICE_SHARED_KEY comes from .env.local (the npm script loads it). It is never printed.
@@ -17,7 +19,7 @@
 // --watch polls as a pretend phone ("sim-watcher"). If no phone holds the hat it pairs with it, and
 // keeps it for 60 s after the sim stops, so the iPhone gets 409 until then. If the iPhone already
 // holds it, --watch gets 409. Leave --watch off when the iPhone app is listening, or test with
-// another hat ID (--device sim-01).
+// another hat ID (--hat sim-01).
 
 import { createHmac } from "node:crypto";
 import { spawn } from "node:child_process";
@@ -32,8 +34,32 @@ const opt = (name, fallback) => {
   return i >= 0 && args[i + 1] && !args[i + 1].startsWith("--") ? args[i + 1] : fallback;
 };
 
+const USAGE = `Usage: npm run sim -- --hat <id> [options]
+
+Pretends to be the hat camera: POSTs JPEGs to /api/device/frame like the firmware.
+
+  --hat <id>        hat ID to send as (required; use a test ID such as sim-01, not the real hat)
+  --image <file>    send one picture over and over      --dir <folder>  cycle through its JPEGs
+  --webcam          use the Mac's camera (ffmpeg)       --camera <n>    avfoundation index
+  --button          press "read now" on the first frame
+  --watch           also poll /api/device/next as a pretend phone and print answers
+  --url <url>       server (default http://localhost:3000)
+  --interval <ms>   time between frames (default 1500)  --frames <n>    stop after n frames
+  --hold <n>        frames per still image (default 4)
+  --help            show this help`;
+
+if (flag("help") || args.includes("-h")) {
+  console.log(USAGE);
+  process.exit(0);
+}
+
 const base = opt("url", process.env.SIM_URL || "http://localhost:3000").replace(/\/+$/, "").replace(/\/api\/device\/frame$/, "");
-const device = opt("device", "hat-01");
+const device = opt("hat", opt("device", ""));
+if (!device) {
+  console.error("Pass --hat <id> (for example --hat sim-01). There's no default, so the sim can't");
+  console.error("send into a real, paired hat by accident. See --help.");
+  process.exit(2);
+}
 const interval = Number(opt("interval", "1500"));
 const maxFrames = Number(opt("frames", "0")) || Infinity;
 const hold = Math.max(1, Number(opt("hold", "4")));

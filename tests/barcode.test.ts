@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import {
   fromOpenFda,
   fromOpenFoodFacts,
+  looksLikeMedicine,
+  ndcStrength,
   gtin14,
   isDrugUpc,
   validBarcode,
@@ -155,5 +157,68 @@ describe("fromOpenFda", () => {
     expect(r.spokenText.toLowerCase()).toContain("pain reliever");
     expect(r.spokenText).toContain("No recalls found.");
     expect(r.sections[0].title).not.toBe("Recalls");
+  });
+});
+
+describe("barcode data quality (QA #8, #9)", () => {
+  const withProduct = (name: string, patch: Record<string, unknown>) => {
+    const f = fixture(name);
+    return { ...f, product: { ...f.product, ...patch } };
+  };
+
+  it("a multipack says the pack and the unit size, not the total", () => {
+    const r = fromOpenFoodFacts(fixture("off-soda"))!;
+    expect(r.spokenText).toContain("12-pack of 12 fl oz");
+    expect(r.spokenText).not.toContain("144 fl oz");
+  });
+
+  it("a package of cookies isn't a multipack", () => {
+    const r = fromOpenFoodFacts(fixture("off-snack"))!;
+    expect(r.spokenText).toContain("16 oz (453 g)");
+    expect(r.spokenText).not.toContain("-pack");
+  });
+
+  it("implausible per-serving data (Oreo: 3 g, 14 calories) falls back to per 100 g, and says so", () => {
+    const r = fromOpenFoodFacts(fixture("off-oreo"))!;
+    const titles = r.sections.map((x) => x.title);
+    expect(titles).toContain("Nutrition (per 100 g)");
+    expect(titles).not.toContain("Nutrition (per serving)");
+    expect(section(r, "Nutrition (per 100 g)")).toMatch(/per-serving numbers .* looked wrong/i);
+    expect(r.spokenText).toContain("per 100 grams");
+    expect(r.spokenText).not.toMatch(/\b(14 calories|1\.2 grams)/); // 41.2 g per 100 g is right
+  });
+
+  it.each([["400 g ℮"], ["400 g e"]])("strips the estimated-sign from %s", (quantity) => {
+    const r = fromOpenFoodFacts(withProduct("off-snack", { quantity }))!;
+    expect(r.spokenText).toContain("Nutter Butter, 400 g.");
+  });
+
+  it('says "1 gram", not "1 grams"', () => {
+    const f = fixture("off-snack");
+    f.product.nutriments.sugars_serving = 1;
+    const r = fromOpenFoodFacts(f)!;
+    expect(r.spokenText).toContain("1 gram of sugar per serving");
+  });
+
+  it.each([
+    [{ product_name: "Advil 50 tablets" }, true],
+    [{ product_name: "Tylenol Extra Strength", brands: "Tylenol" }, true],
+    [{ product_name: "Vitamin D3", categories_tags: ["en:dietary-supplements"] }, true],
+    [{ product_name: "Ibuprofen 200 mg caplets" }, true],
+    [{ product_name: "Nutter Butter", categories_tags: ["en:snacks"] }, false],
+    [{ product_name: "Diet Coke Soft Drink", brands: "Coca-Cola" }, false],
+  ])("looksLikeMedicine(%j) -> %s", (product, expected) => {
+    expect(looksLikeMedicine(product)).toBe(expected);
+  });
+});
+
+describe("ndcStrength (openFDA NDC directory strengths)", () => {
+  it.each([
+    ["200 mg/1", "200 mg"],
+    ["500 mg/1", "500 mg"],
+    ["160 mg/5mL", "160 mg/5mL"],
+    ["", ""],
+  ])("%s -> %s", (raw, expected) => {
+    expect(ndcStrength(raw)).toBe(expected);
   });
 });
