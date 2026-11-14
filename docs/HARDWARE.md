@@ -38,7 +38,7 @@ Research notes from Saturday 14 Nov, about 1 PM. Prices and stock change hourly,
    - Connect to Wi-Fi.
    - Loop about every 1.5 s, or immediately when the BOOT button (GPIO0) is pressed:
      - Get a frame with `esp_camera_fb_get()`.
-     - POST it with `WiFiClientSecure` (`setInsecure()`) and `HTTPClient` (`setReuse(true)`, so TLS isn't renegotiated every frame) to `https://<app>.vercel.app/api/device/frame` as `Content-Type: image/jpeg`, with headers `x-sightline-device` and `x-device-key`.
+     - POST it with `WiFiClientSecure` (`setInsecure()`) and `HTTPClient` (`setReuse(true)`, so TLS isn't renegotiated every frame) to `https://<app>.vercel.app/api/device/frame` as `Content-Type: image/jpeg`, with headers `x-device-id` and `x-device-key` (plus `x-device-button: 1` when the button is pressed).
      - Return the frame buffer.
    - Blink the LED when a POST succeeds ([pattern](https://forum.arduino.cc/t/out-of-memory-for-a-simple-10kb-photo/1096600)).
 6. **Test before the board arrives.** Write the server route tonight and test it by sending saved JPEGs with `curl --data-binary @menu.jpg`.

@@ -1,5 +1,6 @@
 import { deviceId } from "@/lib/db";
 import { webLookup } from "@/lib/lookup";
+import { readJson } from "@/lib/http";
 
 // Web lookup for the last answer. The client calls this after the first answer has been spoken,
 // so it never delays it.
@@ -7,10 +8,9 @@ import { webLookup } from "@/lib/lookup";
 export const maxDuration = 30;
 
 export async function POST(request: Request) {
-  let body: Record<string, unknown>;
-  try {
-    body = ((await request.json()) ?? {}) as Record<string, unknown>;
-  } catch {
+  // A query plus the answer it's about: a few KB. 64 KB is plenty.
+  const parsed = await readJson(request, 64_000);
+  if (!parsed.ok) {
     return Response.json(
       {
         spokenText: "Sorry, that web lookup request didn't come through.",
@@ -19,10 +19,10 @@ export async function POST(request: Request) {
         sources: [],
         error: true,
       },
-      { status: 400 },
+      { status: parsed.reason === "too-large" ? 413 : 400 },
     );
   }
-  const result = await webLookup(body, { device: deviceId(request) });
+  const result = await webLookup(parsed.body, { device: deviceId(request) });
   return Response.json(result.body, {
     status: result.status,
     headers: { "Cache-Control": "no-store" },

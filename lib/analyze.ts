@@ -3,6 +3,7 @@ import { ITEM_KINDS, type AnalyzeResponse, type ItemKind, type Mode } from "@/li
 import { after } from "next/server";
 import { randomUUID } from "node:crypto";
 import { PROMPT_VERSION, systemPrompt, userPrompt } from "@/lib/prompts";
+import { imageMediaType } from "@/lib/http";
 import {
   analysisKey,
   dbConfigured,
@@ -62,22 +63,30 @@ export type AnalyzeInput = {
   question?: string;
   key?: string; // target id from a frame check, saved with the scan
   device?: string; // history owner (the phone's x-sightline-device ID)
-  /** "after" (default): write cache and history after the response is sent. "await": write now. */
-  persist?: "after" | "await";
+  /** "after" (default): write cache and history after the response is sent. "await": write now.
+   *  "defer": start writing now and return the write as `saved`, for the caller to await later. */
+  persist?: "after" | "await" | "defer";
 };
 
-export type AnalyzeResult = { body: AnalyzeResponse; status: number };
+export type AnalyzeResult = { body: AnalyzeResponse; status: number; saved?: Promise<void> };
 
 /** Cache the answer and save it to the device's history, then return it with its scan id. */
 async function finish(
   result: AnalyzeResponse,
-  ctx: { cacheKey: string; device?: string; mode: Mode; key?: string; cached: boolean },
-  persist: "after" | "await",
+  ctx: {
+    cacheKey: string;
+    device?: string;
+    mode: Mode;
+    key?: string;
+    cached: boolean;
+    priorScan?: Promise<string | undefined>;
+  },
+  persist: "after" | "await" | "defer",
 ): Promise<AnalyzeResult> {
   let scanId: string | undefined;
   if (ctx.device && dbConfigured()) {
     // A replay or retry of the same photo reuses the history entry made a moment ago.
-    scanId = (ctx.cached && (await recentScanId(ctx.device, ctx.cacheKey))) || randomUUID();
+    scanId = (ctx.cached && (await ctx.priorScan)) || randomUUID();
   }
   const body: AnalyzeResponse = {
     ...result,
@@ -101,6 +110,7 @@ async function finish(
     }
   };
   if (persist === "await") await save();
+  else if (persist === "defer") return { body, status: 200, saved: save() };
   else after(save);
   return { body, status: 200 };
 }
@@ -142,8 +152,11 @@ export async function analyzePhoto(input: AnalyzeInput): Promise<AnalyzeResult> 
   };
 
   // The same photo and request again (Replay, Retry, a demo re-run): answer from the cache.
+  // The history lookup for a repeat runs alongside the cache read, so a hit costs one round trip.
+  const priorScan =
+    ctx.device && dbConfigured() ? recentScanId(ctx.device, ctx.cacheKey) : undefined;
   const cached = await getCachedAnalysis(ctx.cacheKey);
-  if (cached) return finish(cached, { ...ctx, cached: true }, persist);
+  if (cached) return finish(cached, { ...ctx, cached: true, priorScan }, persist);
 
   const client = new Anthropic();
 
@@ -153,7 +166,7 @@ export async function analyzePhoto(input: AnalyzeInput): Promise<AnalyzeResult> 
       maxTokens: 3000, // a full page of text fits; spoken answers stay short
       system: systemPrompt(mode, targetLanguage),
       content: [
-        { type: "image", source: { type: "base64", media_type: "image/jpeg", data } },
+        { type: "image", source: { type: "base64", media_type: imageMediaType(data), data } },
         { type: "text", text: userPrompt(mode, targetLanguage, followUp) },
       ],
       schema: OUTPUT_SCHEMA,

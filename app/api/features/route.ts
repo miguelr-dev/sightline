@@ -15,6 +15,7 @@ export async function GET() {
     history: dbConfigured(),
     ask: dbConfigured() && Boolean(process.env.ANTHROPIC_API_KEY),
     hat: dbConfigured() && Boolean(process.env.DEVICE_SHARED_KEY),
+    hatCommands: true, // /api/device/command exists; it answers 503 itself when the hat isn't set up
   };
   return Response.json(body, { headers: { "Cache-Control": "no-store" } });
 }

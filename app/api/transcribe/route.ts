@@ -1,9 +1,5 @@
-import {
-  ELEVENLABS_API,
-  FALLBACK_STT_MODEL,
-  elevenKey,
-  sttModel,
-} from "@/lib/elevenlabs";
+import { ELEVENLABS_API, FALLBACK_STT_MODEL, elevenKey, sttModel } from "@/lib/elevenlabs";
+import { readBody } from "@/lib/http";
 
 // ElevenLabs speech-to-text (Scribe). Used for voice commands on browsers without
 // SpeechRecognition, such as iOS Safari in home-screen mode. The body is the raw recording.
@@ -42,20 +38,24 @@ export async function POST(request: Request) {
   if (!key) return fail("not-configured", 503);
 
   const type = (request.headers.get("content-type") || "audio/webm").split(";")[0];
-  let bytes: ArrayBuffer;
+  let bytes: Uint8Array | null;
   try {
-    bytes = await request.arrayBuffer();
+    bytes = await readBody(request, MAX_BYTES);
   } catch {
     return fail("bad-request", 400);
   }
+  if (!bytes) return fail("too-large", 413);
   if (bytes.byteLength < 500) return fail("too-short", 400);
-  if (bytes.byteLength > MAX_BYTES) return fail("too-large", 413);
-  const audio = new Blob([bytes], { type });
+  const audio = new Blob([bytes as Uint8Array<ArrayBuffer>], { type });
 
   try {
     const model = sttModel();
     let upstream = await transcribe(audio, type, model, key);
-    if (!upstream.ok && model !== FALLBACK_STT_MODEL && (upstream.status === 400 || upstream.status === 422)) {
+    if (
+      !upstream.ok &&
+      model !== FALLBACK_STT_MODEL &&
+      (upstream.status === 400 || upstream.status === 422)
+    ) {
       upstream = await transcribe(audio, type, FALLBACK_STT_MODEL, key);
     }
     if (!upstream.ok) {
@@ -66,7 +66,12 @@ export async function POST(request: Request) {
     const data = (await upstream.json()) as { text?: unknown };
     // Drop audio-event tags such as "(laughter)" so they don't confuse command parsing.
     const text =
-      typeof data.text === "string" ? data.text.replace(/\([^)]*\)|\[[^\]]*\]/g, " ").replace(/\s+/g, " ").trim() : "";
+      typeof data.text === "string"
+        ? data.text
+            .replace(/\([^)]*\)|\[[^\]]*\]/g, " ")
+            .replace(/\s+/g, " ")
+            .trim()
+        : "";
     return Response.json({ text });
   } catch (error) {
     console.error("ElevenLabs STT failed:", error);

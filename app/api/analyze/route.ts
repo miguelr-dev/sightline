@@ -1,6 +1,7 @@
 import { MODES, LANGUAGES, type Mode } from "@/lib/modes";
 import { deviceId } from "@/lib/db";
 import { analyzePhoto } from "@/lib/analyze";
+import { readJson } from "@/lib/http";
 
 export const maxDuration = 60;
 
@@ -11,14 +12,14 @@ function fail(spokenText: string, status: number) {
 }
 
 export async function POST(request: Request) {
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return fail("Sorry, that request didn't come through. Please try again.", 400);
+  const parsed = await readJson(request, MAX_IMAGE_CHARS + 20_000);
+  if (!parsed.ok) {
+    return parsed.reason === "too-large"
+      ? fail("That photo is too large. Please try again.", 413)
+      : fail("Sorry, that request didn't come through. Please try again.", 400);
   }
 
-  const { image, mode, language, question, key } = (body ?? {}) as Record<string, unknown>;
+  const { image, mode, language, question, key } = parsed.body;
 
   if (typeof image !== "string" || image.length < 100) {
     return fail("I didn't get a photo. Please try capturing again.", 400);

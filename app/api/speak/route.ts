@@ -1,4 +1,5 @@
 import { ELEVENLABS_API, elevenKey, ttsModel, voiceId } from "@/lib/elevenlabs";
+import { readJson } from "@/lib/http";
 
 // ElevenLabs text-to-speech. The client sends one sentence-sized chunk at a time
 // and falls back to the browser's own voice if this route fails.
@@ -41,12 +42,13 @@ export async function POST(request: Request) {
   const key = elevenKey();
   if (!key) return fail("not-configured", 503);
 
-  let input: Record<string, unknown>;
-  try {
-    input = ((await request.json()) ?? {}) as Record<string, unknown>;
-  } catch {
-    return fail("bad-request", 400);
-  }
+  const parsed = await readJson(request, 16_000);
+  if (!parsed.ok)
+    return fail(
+      parsed.reason === "too-large" ? "too-large" : "bad-request",
+      parsed.reason === "too-large" ? 413 : 400,
+    );
+  const input = parsed.body;
 
   const text = str(input.text, MAX_TEXT);
   if (!text) return fail("no-text", 400);
@@ -72,7 +74,7 @@ export async function POST(request: Request) {
     }
     // An unknown or unavailable voice: fall back to the default voice.
     if (voice !== voiceId() && (upstream.status === 400 || upstream.status === 404)) {
-      upstream = await synthesize(body, key, voiceId());
+      upstream = await synthesize(code ? { ...body, language_code: code } : body, key, voiceId());
     }
     if (!upstream.ok || !upstream.body) {
       const detail = await upstream.text().catch(() => "");

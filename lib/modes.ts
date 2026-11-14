@@ -130,6 +130,21 @@ export type AskResponse = {
   error?: boolean;
 };
 
+/** A spoken command for the hat camera, sent by the paired phone to /api/device/command. */
+export type HatCommandType = "read" | "describe" | "menu" | "translate" | "question" | "lookup";
+export type HatCommand = { type: HatCommandType; question?: string; language?: string };
+
+export type DeviceCommandRequest = {
+  device: string; // hat id
+  pair: string; // the hat's pair code
+  text?: string; // what the user said; parsed with parseCommand when `command` is absent
+  command?: HatCommand;
+};
+
+export type DeviceCommandResponse =
+  | { accepted: true; commandId: string }
+  | { accepted: false; reason: "no-frame" | "unpaired" | "bad-command" };
+
 export type FrameCheckRequest = {
   image: string; // base64 JPEG, about 512 px, no data: prefix
   mode: Mode;
@@ -156,4 +171,5 @@ export type Features = {
   history: boolean; // Neon Postgres is configured (scan history and caches)
   ask: boolean; // "Ask your history" agent is available (/api/ask)
   hat: boolean; // hat camera routes are set up (DEVICE_SHARED_KEY and DATABASE_URL)
+  hatCommands: boolean; // the hat camera takes voice commands (/api/device/command)
 };

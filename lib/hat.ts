@@ -43,3 +43,28 @@ export function checkPairCode(hatId: string, given: string | null): boolean {
   const normalized = given.toLowerCase().replace(/[^a-z0-9]/g, "");
   return safeEqual(normalized, pairCode(hatId, key));
 }
+
+// The frame check names the same target differently from frame to frame, even for the
+// same photo: "precaucion-calle-mayor-sign", "calle-mayor-precaucion-sign",
+// "precaucion-sidewalk-work-sign"; "demo-prin-medicine-label", "demo-prin-medicine-package".
+// For counting frames in a row and for not reading a target twice, keys are compared as sets
+// of distinctive words (no type words, nothing shorter than 3 letters), and two keys are the
+// same target when they share a word. lib/db.ts does the same comparison in SQL with &&.
+const SKIP_WORDS = new Set(["menu", "package", "label", "sign", "page", "slide", "scene", "box"]);
+const FILLER = new Set(["the", "and", "for", "with"]);
+
+/** A key's distinctive words, sorted and hyphenated: "calle-mayor-precaucion". */
+export function matchKey(key: string): string {
+  const words = [...new Set(key.toLowerCase().split("-"))].filter(
+    (w) => w.length >= 3 && !FILLER.has(w),
+  );
+  const named = words.filter((w) => !SKIP_WORDS.has(w));
+  return (named.length ? named : words.length ? words : [key.toLowerCase()]).sort().join("-");
+}
+
+/** True when two match keys name the same target (they share a word). */
+export function sameTarget(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  const B = new Set(b.split("-"));
+  return a.split("-").some((w) => B.has(w));
+}

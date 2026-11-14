@@ -48,10 +48,13 @@ const SCHEMA = [
     id bigserial PRIMARY KEY,
     device_id text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
-    kind text NOT NULL CHECK (kind IN ('detected', 'answer', 'hint')),
+    kind text NOT NULL CHECK (kind IN ('detected', 'answer', 'hint', 'status')),
     payload jsonb NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS device_events_device_idx ON device_events (device_id, id)`,
+  // Voice commands from the phone add a "status" event (e.g. "No picture from your hat camera").
+  `ALTER TABLE device_events DROP CONSTRAINT IF EXISTS device_events_kind_check,
+    ADD CONSTRAINT device_events_kind_check CHECK (kind IN ('detected', 'answer', 'hint', 'status'))`,
   `CREATE TABLE IF NOT EXISTS device_state (
     device_id text PRIMARY KEY,
     last_key text,

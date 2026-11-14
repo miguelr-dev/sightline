@@ -3,7 +3,9 @@ import type { FrameCheckResponse, Mode } from "@/lib/modes";
 import { checkFrame } from "@/lib/frameCheck";
 import { analyzePhoto } from "@/lib/analyze";
 import { webLookup } from "@/lib/lookup";
-import { checkDeviceKey, sharedKey, validHatId } from "@/lib/hat";
+import { checkDeviceKey, matchKey, sameTarget, sharedKey, validHatId } from "@/lib/hat";
+import { readBody } from "@/lib/http";
+import { annotateFrame, putFrame } from "@/lib/frameStore";
 import {
   addDeviceEvent,
   claimHatHint,
@@ -38,18 +40,23 @@ export async function POST(request: Request) {
     return json({ error: "bad x-device-key" }, 401);
   }
 
-  const bytes = new Uint8Array(await request.arrayBuffer());
-  if (bytes.length < 1_000 || bytes.length > MAX_BYTES) {
+  const bytes = await readBody(request, MAX_BYTES).catch(() => null);
+  if (!bytes || bytes.length < 1_000) {
     return json({ error: "send one JPEG between 1 KB and 4.5 MB" }, 413);
   }
   if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return json({ error: "body must be a JPEG" }, 415);
+  // Keep it in memory (never on disk or in Neon) so a voice command can read what the hat
+  // sees right now; see lib/frameStore.ts.
+  const stored = putFrame(hat, bytes);
   const image = Buffer.from(bytes).toString("base64");
   const button = request.headers.get("x-device-button") === "1";
 
   const { result: fc } = await checkFrame(image, "read", `hat=${hat}${button ? " button" : ""}`);
-  const readyKey =
-    fc.ready && fc.key && (fc.confidence ?? 0) >= MIN_CONFIDENCE ? fc.key : null;
-  const state = await updateHatState(hat, readyKey, fc.detected ? (fc.key ?? null) : null);
+  annotateFrame(hat, stored, fc);
+  // Match keys, so "calle-mayor-precaucion-sign" and "precaucion-calle-mayor-sign" count as one.
+  const seenKey = fc.detected && fc.key ? matchKey(fc.key) : null;
+  const readyKey = fc.ready && seenKey && (fc.confidence ?? 0) >= MIN_CONFIDENCE ? seenKey : null;
+  const state = await updateHatState(hat, readyKey, seenKey);
 
   // Read when the same ready target shows up twice in a row (and it wasn't just read), or on
   // the button. The claim is atomic, so overlapping frames can't read the same thing twice.
@@ -58,7 +65,7 @@ export async function POST(request: Request) {
     wantsRead && (await claimHatRead(hat, readyKey ?? fc.key ?? `button-${Date.now()}`, button));
 
   after(async () => {
-    if (fc.detected && fc.key && fc.key !== state?.prevSeenKey) {
+    if (fc.detected && fc.key && !sameTarget(seenKey, state?.prevSeenKey)) {
       await addDeviceEvent(hat, "detected", {
         label: fc.label ?? "",
         key: fc.key,
@@ -87,27 +94,32 @@ async function readAndLookUp(hat: string, image: string, fc: FrameCheckResponse,
   const owner = (await pairedPhone(hat)) ?? `hat-${hat}`;
   const mode: Mode = fc.suggestedMode ?? (fc.detected ? "read" : "describe");
   const started = Date.now();
-  const { body: answer } = await analyzePhoto({
+  const { body: answer, saved } = await analyzePhoto({
     image,
     mode,
     language: "English",
     key: fc.key,
     device: owner,
-    persist: "await", // the scan row must exist before the lookup is attached to it
+    persist: "defer", // post the answer while the scan row is written; the lookup waits for both
   });
-  await addDeviceEvent(hat, "answer", {
-    scanId: answer.scanId ?? null,
-    mode,
-    label: fc.label ?? "",
-    key: fc.key ?? "",
-    button,
-    spokenText: answer.spokenText,
-    sections: answer.sections ?? [],
-    itemKind: answer.itemKind ?? "none",
-    webQuery: answer.webQuery ?? "",
-    error: Boolean(answer.error),
-  });
-  console.log(`[hat] ${hat} read ${mode} in ${Date.now() - started}ms: ${answer.spokenText.slice(0, 80)}`);
+  await Promise.all([
+    saved,
+    addDeviceEvent(hat, "answer", {
+      scanId: answer.scanId ?? null,
+      mode,
+      label: fc.label ?? "",
+      key: fc.key ?? "",
+      button,
+      spokenText: answer.spokenText,
+      sections: answer.sections ?? [],
+      itemKind: answer.itemKind ?? "none",
+      webQuery: answer.webQuery ?? "",
+      error: Boolean(answer.error),
+    }),
+  ]);
+  console.log(
+    `[hat] ${hat} read ${mode} in ${Date.now() - started}ms: ${answer.spokenText.slice(0, 80)}`,
+  );
 
   // Web lookup, the same as the app does after an answer.
   if (!answer.error && answer.webQuery && answer.itemKind && answer.itemKind !== "none") {

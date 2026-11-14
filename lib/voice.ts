@@ -87,7 +87,8 @@ export type Command =
 const LANGUAGE_NAMES = LANGUAGES.map((l) => l.name.toLowerCase()).join("|");
 
 export function parseCommand(raw: string): Command {
-  const t = raw.toLowerCase().replace(/[.,!?]/g, "").trim();
+  // Dictation often uses curly apostrophes ("what’s"); treat them like straight ones.
+  const t = raw.toLowerCase().replace(/[’‘]/g, "'").replace(/[.,!?]/g, "").trim();
 
   if (/^(stop|quiet|be quiet|silence|shut up|pause)\b/.test(t)) return { type: "stop" };
   // Questions about earlier scans go to "Ask your history".
@@ -116,7 +117,10 @@ export function parseCommand(raw: string): Command {
   if (/^(describe|what do you see|what's (in front|around|here)|what is (in front|around|here)|look around|where am i)/.test(t)) {
     return { type: "capture", mode: "describe" };
   }
-  if (/^(read|what does (this|it) say)/.test(t)) return { type: "capture", mode: "read" };
+  // "read this", "what does this say", "what does this sign say", "what does that say"
+  if (/^(read|what does (this|that|it|the) (\w+ )?say)/.test(t)) {
+    return { type: "capture", mode: "read" };
+  }
 
   // Anything else is treated as a question about the last photo.
   return { type: "question", text: raw.trim() };

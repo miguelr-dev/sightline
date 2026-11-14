@@ -58,10 +58,13 @@ export const SCHEMA = [
     id bigserial PRIMARY KEY,
     device_id text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
-    kind text NOT NULL CHECK (kind IN ('detected', 'answer', 'hint')),
+    kind text NOT NULL CHECK (kind IN ('detected', 'answer', 'hint', 'status')),
     payload jsonb NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS device_events_device_idx ON device_events (device_id, id)`,
+  // Voice commands from the phone add a "status" event (e.g. "No picture from your hat camera").
+  `ALTER TABLE device_events DROP CONSTRAINT IF EXISTS device_events_kind_check,
+    ADD CONSTRAINT device_events_kind_check CHECK (kind IN ('detected', 'answer', 'hint', 'status'))`,
   `CREATE TABLE IF NOT EXISTS device_state (
     device_id text PRIMARY KEY,
     last_key text,
@@ -89,7 +92,10 @@ function warnOnce(what: string, error: unknown) {
   failedAt = Date.now();
   if (warned) return;
   warned = true;
-  console.warn(`Neon ${what} failed; continuing without the database:`, String(error).slice(0, 200));
+  console.warn(
+    `Neon ${what} failed; continuing without the database:`,
+    String(error).slice(0, 200),
+  );
 }
 
 export function dbConfigured(): boolean {
@@ -103,11 +109,13 @@ function sql(): Sql | null {
   return client;
 }
 
-/** Create the tables once per server instance. Retries on the next call if it failed. */
+/** Create the tables once per server instance. Retries on the next call if it failed.
+ *  All statements go in one HTTP round trip (about 80 ms, against about 1 s one by one),
+ *  which every cold server instance pays before its first query. */
 function ensureSchema(db: Sql): Promise<boolean> {
   if (!schemaReady) {
     schemaReady = (async () => {
-      for (const statement of SCHEMA) await db.query(statement);
+      await db.transaction(SCHEMA.map((statement) => db.query(statement)));
       return true;
     })().catch((error) => {
       warnOnce("schema setup", error);
@@ -149,12 +157,18 @@ export function analysisKey(parts: {
 }): string {
   return createHash("sha256")
     .update(parts.image)
-    .update("\0" + [parts.mode, parts.language, parts.question ?? "", parts.model, parts.version].join("\0"))
+    .update(
+      "\0" +
+        [parts.mode, parts.language, parts.question ?? "", parts.model, parts.version].join("\0"),
+    )
     .digest("hex");
 }
 
 export function lookupKey(query: string, itemKind: string, language: string): string {
-  const q = query.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  const q = query
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
   return `${itemKind}|${language.toLowerCase()}|${q}`;
 }
 
@@ -371,6 +385,22 @@ export async function recentScans(
   return rows?.map(toSummary);
 }
 
+/** How many scans this device has in all, and how many since `since` (an ISO timestamp). */
+export async function countScans(
+  device: string,
+  since: string,
+): Promise<{ total: number; since: number } | undefined> {
+  const rows = await withDb(
+    "history count",
+    (db) =>
+      db`SELECT count(*)::int AS total,
+                count(*) FILTER (WHERE created_at >= ${since}::timestamptz)::int AS since
+         FROM scans WHERE device_id = ${device}`,
+  );
+  const r = rows?.[0];
+  return r ? { total: Number(r.total), since: Number(r.since) } : undefined;
+}
+
 /** One scan in full, including the web lookup's sections and sources. */
 export async function getScan(device: string, id: string): Promise<ScanRow | undefined> {
   if (!isScanId(id)) return undefined;
@@ -398,7 +428,7 @@ export async function getScan(device: string, id: string): Promise<ScanRow | und
 
 // ---------- Hat camera ----------
 
-export type DeviceEventKind = "detected" | "answer" | "hint";
+export type DeviceEventKind = "detected" | "answer" | "hint" | "status";
 export type DeviceEvent = {
   id: number;
   createdAt: string;
@@ -409,6 +439,7 @@ export type DeviceEvent = {
 /**
  * Record what this frame showed and return how many frames in a row have shown the same
  * ready target (`streak`), plus the target seen on the previous frame (`prevSeenKey`).
+ * Keys are match keys from lib/hat.ts: the same target when they share a word.
  */
 export async function updateHatState(
   device: string,
@@ -424,7 +455,8 @@ export async function updateHatState(
          ON CONFLICT (device_id) DO UPDATE SET
            streak = CASE
              WHEN EXCLUDED.last_key IS NULL THEN 0
-             WHEN device_state.last_key = EXCLUDED.last_key THEN device_state.streak + 1
+             WHEN string_to_array(device_state.last_key, '-') && string_to_array(EXCLUDED.last_key, '-')
+               THEN device_state.streak + 1
              ELSE 1 END,
            last_key = EXCLUDED.last_key,
            last_seen_key = EXCLUDED.last_seen_key,
@@ -446,8 +478,9 @@ export async function claimHatRead(device: string, key: string, force: boolean) 
     (db) =>
       db`UPDATE device_state SET last_read_key = ${key}, last_read_at = now()
          WHERE device_id = ${device}
-           AND (${force} OR last_read_key IS DISTINCT FROM ${key}
-                OR last_read_at < now() - interval '2 minutes')
+           AND (${force} OR last_read_key IS NULL
+                OR last_read_at < now() - interval '2 minutes'
+                OR NOT (string_to_array(last_read_key, '-') && string_to_array(${key}::text, '-')))
          RETURNING 1 AS ok`,
   );
   return Boolean(rows?.length);

@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { MODES, type FrameCheckResponse, type Mode } from "@/lib/modes";
 import { askJson, fastModel } from "@/lib/claude";
+import { imageMediaType } from "@/lib/http";
 
 // Server-only. Auto-capture check, used by /api/frame-check (phone) and /api/device/frame (hat): is a readable target in view (detected, for a
 // "Menu detected, tap to read" card), and can its main text be read right now (ready, to
@@ -48,6 +49,7 @@ export async function checkFrame(
   source?: string, // shown in the log line, e.g. "hat=hat-01"
 ): Promise<{ result: FrameCheckResponse; ok: boolean }> {
   const started = Date.now();
+  const data = image.replace(/^data:image\/\w+;base64,/, "");
   try {
     const parsed = await askJson<{
       detected?: unknown;
@@ -67,8 +69,8 @@ export async function checkFrame(
           type: "image",
           source: {
             type: "base64",
-            media_type: "image/jpeg",
-            data: image.replace(/^data:image\/\w+;base64,/, ""),
+            media_type: imageMediaType(data),
+            data,
           },
         },
         { type: "text", text: "Check this frame." },

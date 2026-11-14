@@ -1,7 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { ITEM_KINDS, LANGUAGES, type AskResponse, type ItemKind } from "@/lib/modes";
+import { readJson } from "@/lib/http";
 import { SECTIONS_SCHEMA, cleanSections, fastModel, quickThinking } from "@/lib/claude";
 import {
+  countScans,
   dbConfigured,
   deviceId,
   getScan,
@@ -89,13 +91,35 @@ function systemPrompt(now: string, timeZone: string, language: string): string {
 
 It is now ${now} (time zone ${timeZone}). Turn "today", "this morning", "yesterday" or "earlier" into a since timestamp with offset when that helps.
 
-The user's message starts with what SightLine already pulled from their history: the scans that best match the question, and their most recent scans. Answer from those when they contain the answer. If they don't, call the tools: search_scans with other key words, recent_scans with a since time, or get_scan for one scan's full sections and web details. Never ask the user which item they mean: pick the most recent scan that fits and say which one you used. Never say you will check or search more; check first, then give a final answer. Use exact counts (recentScanCount is how many recent scans there are, up to 8).
+The user's message starts with what SightLine already pulled from their history: the scans that best match the question, and their most recent scans. Answer from those when they contain the answer. If they don't, call the tools: search_scans with other key words, recent_scans with a since time, or get_scan for one scan's full sections and web details. Scans are stored in English, so search with English key words, translating them if the question is in another language. Before saying something isn't in the history, search for it at least once. Never ask the user which item they mean: pick the most recent scan that fits and say which one you used. Never say you will check or search more; check first, then give a final answer. Use exact counts: scansToday is how many scans the user made today and totalScans how many in all; recentScans only holds the newest few.
 
 Final reply, in ${language}:
 - spokenText: read aloud, so one or two short sentences, about 30 words. Go straight to the answer ("The Nutter Butter cookies contain peanuts, wheat and soy."). Say roughly when it was scanned if that helps ("this morning"). Plain spoken sentences, no markdown or URLs. Always include any recall, warning or allergen that answers the question.
 - sections: optional supporting detail in 0 to 3 short titled sections.
 - scanIds: the ids of the scans your answer is based on.
 Only use what the tools return. If the scans don't answer it, say so plainly ("I don't see a medicine in your recent scans.").`;
+}
+
+/** Midnight at the start of today in `timeZone`, as an ISO timestamp. */
+function startOfToday(timeZone: string): string {
+  const now = new Date();
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    })
+      .formatToParts(now)
+      .map((x) => [x.type, Number(x.value)]),
+  );
+  const wall = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+  const offset = wall - Math.floor(now.getTime() / 1000) * 1000;
+  return new Date(Date.UTC(p.year, p.month - 1, p.day) - offset).toISOString();
 }
 
 function formatLocal(iso: string, timeZone: string): string {
@@ -134,18 +158,20 @@ function kindArg(v: unknown): ItemKind | undefined {
 
 export async function POST(request: Request) {
   const started = Date.now();
-  let body: Record<string, unknown>;
-  try {
-    body = ((await request.json()) ?? {}) as Record<string, unknown>;
-  } catch {
+  const parsed = await readJson(request, 16_000);
+  if (!parsed.ok) {
     return Response.json(
       {
-        spokenText: "Sorry, that question didn't come through.",
+        spokenText:
+          parsed.reason === "too-large"
+            ? "That question is too long. Please ask a shorter one."
+            : "Sorry, that question didn't come through.",
         error: true,
       } satisfies AskResponse,
-      { status: 400 },
+      { status: parsed.reason === "too-large" ? 413 : 400 },
     );
   }
+  const body = parsed.body;
   const question = str(body.question, 500);
   const device = deviceId(request);
   if (!question) {
@@ -228,9 +254,10 @@ export async function POST(request: Request) {
 
   // Agent memory up front: the best full-text matches for the question and the latest scans,
   // fetched in parallel, so most questions are answered in one model turn.
-  const [matches, recent] = await Promise.all([
+  const [matches, recent, counts] = await Promise.all([
     searchScans(device, { query: question, limit: 4 }),
     recentScans(device, { limit: 8 }),
+    countScans(device, startOfToday(timeZone)),
   ]);
   if (!matches && !recent) {
     return Response.json({
@@ -241,7 +268,7 @@ export async function POST(request: Request) {
   matches?.forEach(remember);
   recent?.forEach(remember);
   const memory = {
-    recentScanCount: recent?.length ?? 0,
+    ...(counts ? { scansToday: counts.since, totalScans: counts.total } : {}),
     bestMatches: (matches ?? []).map((r) => brief(r, timeZone)),
     recentScans: (recent ?? []).map((r) => ({
       id: r.id,
