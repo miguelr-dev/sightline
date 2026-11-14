@@ -77,9 +77,10 @@ export type Features = {
   lookup: boolean | null;
   history: boolean | null;
   ask: boolean | null; // "Ask your history" (/api/ask)
+  hatCommands: boolean | null; // voice commands to the hat camera (/api/device/command)
 };
 
-export const UNKNOWN_FEATURES: Features = { elevenlabs: null, transcribe: null, lookup: null, history: null, ask: null };
+export const UNKNOWN_FEATURES: Features = { elevenlabs: null, transcribe: null, lookup: null, history: null, ask: null, hatCommands: null };
 
 export type FrameCheck = {
   ready: boolean;
@@ -126,7 +127,7 @@ export type Scan = {
 export type DeviceEvent = {
   id: string;
   createdAt: string;
-  kind: "detected" | "answer" | "hint";
+  kind: "detected" | "answer" | "hint" | "status"; // status: a message about a voice command
   payload: Record<string, unknown>;
 };
 

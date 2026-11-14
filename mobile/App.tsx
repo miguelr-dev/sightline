@@ -24,6 +24,7 @@ import {
   getVoices,
   lookup,
   parseDeviceAnswer,
+  sendHatCommand,
   setBaseUrl,
   setDeviceId,
   transcribe,
@@ -53,6 +54,14 @@ import { DetectionCard } from "./src/components/DetectionCard";
 import { HatView } from "./src/components/HatView";
 import { useAutoCapture, type AutoDebug, type Detection } from "./src/useAutoCapture";
 import { useHatCamera } from "./src/useHatCamera";
+import {
+  HISTORY_QUESTION,
+  initialCommandState,
+  reduceCommand,
+  routeInput,
+  type CommandAction,
+  type CommandState,
+} from "./src/logic/hatCommands";
 
 // 1024 px at quality 0.6: in tests against the demo images this read exactly the same text as
 // 0.7, and the upload is about 17% smaller. 896 px saved little more and risks small print.
@@ -90,8 +99,6 @@ const haptic = {
 type SheetName = "none" | "result" | "settings" | "language" | "recent";
 
 const LOADING_DELAY_MS = 300; // a cached lookup that lands sooner never shows a spinner
-// Spoken questions that are about earlier scans rather than the photo in front of you.
-const HISTORY_QUESTION = /^\s*(what (did|have) i (scan|scanned|see|seen|read)|remind me|earlier|yesterday|last time)\b/i;
 
 function Main() {
   const insets = useSafeAreaInsets();
@@ -104,7 +111,10 @@ function Main() {
   const [askState, setAskState] = useState<AskState>(demo?.ask ?? { status: "idle" });
   const [askAvailable, setAskAvailable] = useState(true); // false after /api/ask 404s
   const askId = useRef(0);
-  const voiceTarget = useRef<"photo" | "history" | "main">("photo");
+  const voiceTarget = useRef<"photo" | "history" | "main" | "hat">("photo");
+  const [cmd, setCmd] = useState<CommandState>(initialCommandState);
+  const cmdRef = useRef<CommandState>(initialCommandState);
+  const cmdLocalId = useRef(0);
   const [shot, setShot] = useState<Shot | null>(demo?.shot ?? null);
   const [sheet, setSheetState] = useState<SheetName>(demo?.sheet ?? "none");
   const [busy, setBusy] = useState(false);
@@ -436,7 +446,55 @@ function Main() {
   const hatHintClear = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hatShotToken = useRef<{ shotId: number; token: number } | null>(null);
 
+  // Answers and status messages go through the command reducer first: answers to the pending
+  // voice command open and speak; stale ones are dropped; the hat's own reads pass through.
   const onHatEvent = (e: DeviceEvent) => {
+    if (e.kind === "answer" || e.kind === "status") dispatchCmd({ type: "event", event: e });
+    else handleHatEvent(e);
+  };
+
+  function dispatchCmd(action: CommandAction) {
+    const { state, effects } = reduceCommand(cmdRef.current, action);
+    cmdRef.current = state;
+    setCmd(state);
+    for (const fx of effects) {
+      if (fx.type === "stopSpeech") silence();
+      else if (fx.type === "speak") say(fx.text);
+      else handleHatEvent(fx.event); // showAnswer and passthrough both use the normal answer flow
+    }
+  }
+
+  // Ticks the 12 s answer timeout while a command is pending.
+  useEffect(() => {
+    if (!cmd.current) return;
+    const t = setInterval(() => dispatchCmd({ type: "tick", at: Date.now() }), 500);
+    return () => clearInterval(t);
+  }, [!!cmd.current]);
+
+  const hatCommandsOn = !!demo || connection.features.hatCommands === true;
+
+  /** Typed and spoken requests in hat mode both come through here (same routing, same path). */
+  async function submitHatInput(raw: string, source: "typed" | "voice") {
+    const route = routeInput(raw, { askAvailable: askOn, source });
+    if (route.kind === "empty") return;
+    if (route.kind === "ask") {
+      void openRecent();
+      return void runAsk(route.question);
+    }
+    if (!hatCommandsOn) {
+      haptic.error();
+      return say("Talking to the hat camera isn't available on this server yet.");
+    }
+    const localId = ++cmdLocalId.current;
+    haptic.capture();
+    dispatchCmd({ type: "send", localId, text: route.text, at: Date.now() });
+    const { settings: st } = live.current;
+    const res = await sendHatCommand(st.hatDeviceId.trim(), st.hatPairCode.trim(), route.text);
+    if (res.accepted && res.commandId) dispatchCmd({ type: "accepted", localId, commandId: res.commandId });
+    else dispatchCmd({ type: "rejected", localId, reason: res.reason ?? "error" });
+  }
+
+  const handleHatEvent = (e: DeviceEvent) => {
     const p = e.payload;
     if (e.kind === "detected") {
       const label = typeof p.label === "string" && p.label.trim() ? p.label.trim() : "";
@@ -637,6 +695,7 @@ function Main() {
     }
     if (token !== speakToken.current) return; // sheet closed while transcribing
     const target = voiceTarget.current;
+    if (target === "hat") return void submitHatInput(text, "voice");
     if (target === "photo") return void ask(text);
     if (target === "history") return void runAsk(text);
     // Main screen: questions about earlier scans (or any question before there's a photo) go to
@@ -654,9 +713,10 @@ function Main() {
     void ask(text);
   };
 
-  const toggleMic = async (target: "photo" | "history" | "main" = "photo") => {
+  const toggleMic = async (target: "photo" | "history" | "main" | "hat" = "photo") => {
     if (recording) return stopRecording();
     voiceTarget.current = target;
+    if (target === "hat") silence(); // also keeps a late web summary from talking over the recording
     const perm = await requestRecordingPermissionsAsync();
     if (!perm.granted) {
       haptic.error();
@@ -664,7 +724,9 @@ function Main() {
     }
     speech.stop();
     try {
-      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      // Phone mic or Bluetooth headset mic (expo-audio adds allowBluetooth when recording), and
+      // keep output on the loudspeaker rather than the quiet earpiece receiver.
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true, shouldRouteThroughEarpiece: false });
       await recorder.prepareToRecordAsync();
       recorder.record();
       setRecording(true);
@@ -812,6 +874,12 @@ function Main() {
           bottomInset={insets.bottom}
           onOpenLast={() => setSheet("result")}
           onDisconnect={disconnectHat}
+          commandsOn={hatCommandsOn}
+          recording={recording && voiceTarget.current === "hat"}
+          transcribing={transcribing && voiceTarget.current === "hat"}
+          asking={demo?.hatAsking ?? (cmd.current ? cmd.current.text : null)}
+          onTalk={() => void toggleMic("hat")}
+          onType={(text) => void submitHatInput(text, "typed")}
         />
       ) : null}
 

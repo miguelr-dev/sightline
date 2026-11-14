@@ -71,6 +71,7 @@ export async function getFeatures(): Promise<{ reachable: boolean; features: Fea
         lookup: typeof f.lookup === "boolean" ? f.lookup : null,
         history: typeof f.history === "boolean" ? f.history : null,
         ask: typeof f.ask === "boolean" ? f.ask : null,
+        hatCommands: typeof f.hatCommands === "boolean" ? f.hatCommands : null,
       },
     };
   } catch {
@@ -335,7 +336,7 @@ export async function deviceNext(
       ? data.events
           .filter((e): e is Record<string, unknown> => !!e && typeof e === "object")
           .filter((e) => (typeof e.id === "string" || typeof e.id === "number") && typeof e.kind === "string")
-          .filter((e) => e.kind === "detected" || e.kind === "answer" || e.kind === "hint")
+          .filter((e) => e.kind === "detected" || e.kind === "answer" || e.kind === "hint" || e.kind === "status")
           .map((e) => ({
             id: String(e.id),
             createdAt: typeof e.createdAt === "string" ? e.createdAt : "",
@@ -414,5 +415,32 @@ export async function askHistory(question: string, language?: string): Promise<A
     sections: [],
     scans: [],
     error: true,
+  };
+}
+
+// Voice or typed command to the hat camera: it captures now and the answer comes back through
+// /api/device/next with this commandId. status 404 = route missing.
+export async function sendHatCommand(
+  hardwareId: string,
+  pairCode: string,
+  text: string,
+): Promise<{ status: number; accepted: boolean; commandId?: string; reason?: string }> {
+  const r = await postJson<Record<string, unknown>>("/api/device/command", { device: hardwareId, pair: pairCode, text }, 10_000);
+  const d = r.data ?? {};
+  const commandId = typeof d.commandId === "string" || typeof d.commandId === "number" ? String(d.commandId) : undefined;
+  if (r.ok && d.accepted === true && commandId) return { status: r.status, accepted: true, commandId };
+  return {
+    status: r.status,
+    accepted: false,
+    reason:
+      typeof d.reason === "string"
+        ? d.reason
+        : r.status === 404 || r.status === 405
+          ? "unavailable"
+          : r.status === 403 || r.status === 401
+            ? "unpaired"
+            : r.status <= 0
+              ? "offline"
+              : "error",
   };
 }

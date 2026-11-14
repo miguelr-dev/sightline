@@ -65,6 +65,7 @@ type Demo = {
   scans: Scan[] | null;
   detection: { key: string; label: string; mode: Mode | null; confidence: number | null } | null;
   hat: boolean;
+  hatAsking: string | null;
   ask: { status: "done"; question: string; answer: AskAnswer; id: number } | null;
 };
 
@@ -102,6 +103,7 @@ export function demoState(): Demo | null {
     detection:
       q === "home" || q === "hat" ? { key: "harbor-table-menu", label: "Harbor Table menu", mode: "menu", confidence: 0.92 } : null,
     hat: q === "hat",
+    hatAsking: null,
     ask:
       q === "recent-ask"
         ? {

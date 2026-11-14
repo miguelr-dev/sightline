@@ -1,13 +1,14 @@
 import { useKeepAwake } from "expo-keep-awake";
 import { Image } from "expo-image";
 import { useEffect, useState } from "react";
+import { ActivityIndicator, KeyboardAvoidingView, TextInput } from "react-native";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { colors, radius, type } from "../theme";
 import type { Shot } from "../types";
 import type { HatStatus } from "../useHatCamera";
 import type { Detection } from "../useAutoCapture";
 import { DetectionCard } from "./DetectionCard";
-import { Icon, PillButton } from "./ui";
+import { Icon, IconButton, PillButton } from "./ui";
 
 function KeepAwake() {
   useKeepAwake("sightline-hat"); // Expo Go has to stay in the foreground to keep polling
@@ -44,6 +45,12 @@ export function HatView({
   bottomInset,
   onOpenLast,
   onDisconnect,
+  commandsOn,
+  recording,
+  transcribing,
+  asking,
+  onTalk,
+  onType,
 }: {
   deviceId: string;
   status: HatStatus;
@@ -56,7 +63,20 @@ export function HatView({
   bottomInset: number;
   onOpenLast: () => void;
   onDisconnect: () => void;
+  commandsOn: boolean; // server supports /api/device/command
+  recording: boolean;
+  transcribing: boolean;
+  asking: string | null; // the pending command's text
+  onTalk: () => void;
+  onType: (text: string) => void;
 }) {
+  const [typed, setTyped] = useState("");
+  const sendTyped = () => {
+    const t = typed.trim();
+    if (!t) return;
+    setTyped("");
+    onType(t);
+  };
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -67,13 +87,16 @@ export function HatView({
   const eventLine = lastEventAt ? `Last event ${age(now - lastEventAt)}` : live ? "Waiting for the first event" : "";
 
   return (
-    <View style={[s.root, { paddingTop: topInset + 76, paddingBottom: bottomInset + 12 }]}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      style={[s.root, { paddingTop: topInset + 76, paddingBottom: bottomInset + 12 }]}
+    >
       {Platform.OS !== "web" ? <KeepAwake /> : null}
       <View style={s.top}>
-        <View style={s.glyph} accessible={false}>
+        <View style={[s.glyph, commandsOn && s.glyphSmall]} accessible={false}>
           <Icon sf="dot.radiowaves.left.and.right" ion="radio-outline" size={34} />
         </View>
-        <Text style={type.largeTitle} accessibilityRole="header">
+        <Text style={commandsOn ? type.title2 : type.largeTitle} accessibilityRole="header">
           Listening to your hat camera
         </Text>
         <View style={s.statusRow} accessible accessibilityLabel={`${STATUS_TEXT[status]}. Hat ${deviceId}. ${eventLine}`}>
@@ -86,7 +109,7 @@ export function HatView({
         </Text>
       </View>
 
-      <View style={s.bottom}>
+      <View style={[s.bottom, commandsOn && s.bottomFill]}>
         {hint && !detection ? (
           <View style={s.hint} accessible accessibilityLabel={hint}>
             <Icon sf="viewfinder" ion="scan-outline" size={18} />
@@ -94,7 +117,7 @@ export function HatView({
           </View>
         ) : null}
         <DetectionCard detection={detection} reduceMotion={reduceMotion} />
-        {last?.result && !detection ? (
+        {last?.result && !detection && !commandsOn ? (
           <Pressable
             onPress={onOpenLast}
             accessibilityRole="button"
@@ -109,15 +132,74 @@ export function HatView({
             <Icon sf="chevron.right" ion="chevron-forward" size={15} color={colors.secondary} />
           </Pressable>
         ) : null}
-        <PillButton
-          big
-          label="Disconnect"
-          onPress={onDisconnect}
-          accessibilityHint="Stops listening to the hat camera and turns the phone camera back on"
-          icon={<Icon sf="xmark.circle.fill" ion="close-circle" size={24} color={colors.onPrimary} />}
-        />
+        {commandsOn ? (
+          <>
+            <Pressable
+              onPress={onTalk}
+              accessibilityRole="button"
+              accessibilityLabel={recording ? "Stop and ask your hat" : "Ask your hat"}
+              accessibilityHint={
+                recording
+                  ? "Stops recording and sends your request to the hat camera"
+                  : 'Say what you want, like "read this menu" or "what does this sign say"'
+              }
+              accessibilityState={{ busy: transcribing }}
+              style={({ pressed }) => [s.talk, pressed && { opacity: 0.85 }]}
+            >
+              {recording ? (
+                <View style={s.recRing}>
+                  <View style={s.recDot} />
+                </View>
+              ) : transcribing ? (
+                <ActivityIndicator color={colors.onPrimary} size="large" />
+              ) : (
+                <Icon sf="mic.fill" ion="mic" size={44} color={colors.onPrimary} />
+              )}
+              <Text style={s.talkTitle} maxFontSizeMultiplier={1.8}>
+                {recording ? "Listening…" : transcribing ? "Listening back…" : "Ask your hat"}
+              </Text>
+              <Text style={s.talkSub} maxFontSizeMultiplier={1.8} numberOfLines={2}>
+                {recording
+                  ? "Tap when you're done"
+                  : asking
+                    ? `Asking your hat… “${asking}”`
+                    : "Tap and say “read this menu”"}
+              </Text>
+            </Pressable>
+            <View style={s.typeRow}>
+              <TextInput
+                value={typed}
+                onChangeText={setTyped}
+                onSubmitEditing={sendTyped}
+                placeholder="Type instead"
+                placeholderTextColor={colors.secondary}
+                returnKeyType="send"
+                style={[type.body, s.field]}
+                accessibilityLabel="Type a request for your hat camera"
+              />
+              <IconButton onPress={sendTyped} label="Send to your hat" filled="black" size={52}>
+                <Icon sf="arrow.up" ion="arrow-up" color={colors.onPrimary} weight="bold" />
+              </IconButton>
+            </View>
+            <PillButton
+              label="Disconnect"
+              variant="secondary"
+              onPress={onDisconnect}
+              accessibilityHint="Stops listening to the hat camera and turns the phone camera back on"
+              icon={<Icon sf="xmark.circle.fill" ion="close-circle" size={20} />}
+            />
+          </>
+        ) : (
+          <PillButton
+            big
+            label="Disconnect"
+            onPress={onDisconnect}
+            accessibilityHint="Stops listening to the hat camera and turns the phone camera back on"
+            icon={<Icon sf="xmark.circle.fill" ion="close-circle" size={24} color={colors.onPrimary} />}
+          />
+        )}
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -137,7 +219,41 @@ const s = StyleSheet.create({
   dot: { width: 12, height: 12, borderRadius: 6 },
   dotLive: { backgroundColor: colors.label },
   dotIdle: { backgroundColor: colors.bg, borderWidth: 2, borderColor: colors.label },
-  bottom: { gap: 12 },
+  bottom: { gap: 12, flexShrink: 1 },
+  bottomFill: { flex: 1, justifyContent: "flex-end", marginTop: 16 },
+  glyphSmall: { width: 52, height: 52, borderRadius: 16, marginBottom: 0 },
+  talk: {
+    minHeight: 220,
+    flexGrow: 1,
+    borderRadius: 32,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    paddingVertical: 24,
+    paddingHorizontal: 20,
+  },
+  talkTitle: { fontSize: 30, lineHeight: 36, fontWeight: "700", letterSpacing: 0.3, color: colors.onPrimary },
+  talkSub: { fontSize: 17, lineHeight: 22, fontWeight: "500", color: "#D1D1D6", textAlign: "center" },
+  recRing: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    borderWidth: 3,
+    borderColor: colors.onPrimary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  recDot: { width: 26, height: 26, borderRadius: 13, backgroundColor: colors.record },
+  typeRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  field: {
+    flex: 1,
+    minHeight: 52,
+    backgroundColor: colors.surface,
+    borderRadius: radius.field,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
   hint: {
     flexDirection: "row",
     alignItems: "center",
