@@ -2,7 +2,7 @@ import { fetch } from "expo/fetch";
 import { File, Paths, UploadType } from "expo-file-system";
 import type { AnalyzeResponse, AskAnswer, BarcodeResult, DeviceEvent, Features, FrameCheck, ItemKind, LookupResponse, Mode, Scan, Voice } from "./modes";
 import { cleanSections, httpsUrl, MODES, UNKNOWN_FEATURES } from "./modes";
-import { parseHistoryScan, parseLookup } from "./logic/parse";
+import { parseBarcode, parseHistoryScan, parseLookup } from "./logic/parse";
 import { withTimeout } from "./logic/timeout";
 import type { StripMode } from "./logic/modeStrip";
 import { parseBookPage } from "./logic/book";
@@ -108,6 +108,8 @@ export async function analyze(req: {
           : undefined,
       autoLookup: r.data.autoLookup === true,
       page: parseBookPage((r.data as { page?: unknown }).page) ?? undefined,
+      brand: typeof r.data.brand === "string" && r.data.brand.trim() ? r.data.brand.trim() : undefined,
+      barcode: ((b) => (b?.found ? b : undefined))(parseBarcode(r.data.barcode)),
     };
     return r.ok ? { ...data, httpStatus: r.status } : { ...data, error: true, httpStatus: r.status };
   }
@@ -121,6 +123,7 @@ export async function analyze(req: {
 export async function lookup(req: {
   query: string;
   itemKind?: ItemKind;
+  brand?: string; // pictures and facts must be this brand's; absent = unconfirmed
   scanId?: string;
   language?: string; // Translate mode: write the summary in this language
   context: { mode: Mode; spokenText: string; details: string };
@@ -453,18 +456,7 @@ export async function lookupBarcode(code: string, language?: string): Promise<Ba
     const q = `code=${encodeURIComponent(code)}${language ? `&language=${encodeURIComponent(language)}` : ""}`;
     const res = await fetch(`${baseUrl}/api/barcode?${q}`, { headers: baseHeaders(), signal: controller.signal });
     if (!res.ok) return null;
-    const d = (await res.json()) as Record<string, unknown>;
-    if (typeof d.spokenText !== "string" || !d.spokenText.trim()) return null;
-    return {
-      code: typeof d.code === "string" ? d.code : code,
-      found: d.found === true,
-      spokenText: d.spokenText.trim(),
-      sections: cleanSections(d.sections),
-      itemKind: typeof d.itemKind === "string" ? (d.itemKind as BarcodeResult["itemKind"]) : undefined,
-      image: httpsUrl(d.image),
-      title: typeof d.title === "string" && d.title.trim() ? d.title.trim() : undefined,
-      scanId: typeof d.scanId === "string" || typeof d.scanId === "number" ? String(d.scanId) : undefined,
-    };
+    return parseBarcode(await res.json(), code) ?? null;
   } catch {
     return null;
   } finally {

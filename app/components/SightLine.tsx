@@ -254,6 +254,7 @@ export default function SightLine() {
             query,
             scanId: r.scanId,
             itemKind: r.itemKind,
+            brand: r.brand, // pictures and facts must be this brand's; absent = unconfirmed
             // Translate mode: the web summary comes back in the chosen language.
             language: r.mode === "translate" ? latest.current.language : "English",
             context: { mode: r.mode, spokenText: r.spokenText, details: r.details },

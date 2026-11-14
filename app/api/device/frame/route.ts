@@ -134,6 +134,7 @@ async function readAndLookUp(hat: string, image: string, fc: FrameCheckResponse,
       {
         query: answer.webQuery,
         itemKind: answer.itemKind,
+        brand: answer.brand,
         scanId: answer.scanId,
         context: { mode, spokenText: answer.spokenText },
       },

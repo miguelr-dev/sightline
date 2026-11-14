@@ -186,6 +186,11 @@ export function ResultSheet(p: Props) {
                     {r.spokenText}
                   </Text>
                 )}
+                {r.barcode?.found && !r.error ? (
+                  <Text style={type.caption} selectable>
+                    Scanned barcode {r.barcode.code}
+                  </Text>
+                ) : null}
 
                 <View style={s.row}>
                   {r.error && !shot!.fromHistory ? (

@@ -1,4 +1,26 @@
-import { cleanSections, httpsUrl, MODES, type ItemKind, type LookupResponse, type Mode, type Scan } from "../modes";
+import { cleanSections, httpsUrl, MODES, type BarcodeResult, type ItemKind, type LookupResponse, type Mode, type Scan } from "../modes";
+
+const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+
+/** A barcode answer: GET /api/barcode's reply, or the `barcode` on an analyze answer (a barcode
+ *  printed in the photo). `code` is the scanned code when the reply doesn't carry one. */
+export function parseBarcode(v: unknown, code?: string): BarcodeResult | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const d = v as Record<string, unknown>;
+  const c = typeof d.code === "string" ? d.code : code;
+  if (!c || !/^\d{8,14}$/.test(c) || !str(d.spokenText)) return undefined;
+  return {
+    code: c,
+    found: d.found === true,
+    spokenText: str(d.spokenText)!,
+    sections: cleanSections(d.sections),
+    itemKind: typeof d.itemKind === "string" ? (d.itemKind as ItemKind) : undefined,
+    image: httpsUrl(d.image),
+    title: str(d.title),
+    brand: str(d.brand),
+    scanId: typeof d.scanId === "string" || typeof d.scanId === "number" ? String(d.scanId) : undefined,
+  };
+}
 
 export function parseLookup(v: unknown): LookupResponse | null {
   if (!v || typeof v !== "object") return null;

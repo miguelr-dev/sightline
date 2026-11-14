@@ -55,6 +55,7 @@ describe("systemPrompt rules (audit round)", () => {
 
   it("bumps the prompt version so old cached answers aren't reused", () => {
     expect(PROMPT_VERSION).not.toBe("2026-11-14.3");
+    expect(PROMPT_VERSION).not.toBe("2026-11-14.10"); // before brand, barcode, no "Not visible" sections
   });
 });
 

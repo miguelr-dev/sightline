@@ -54,6 +54,8 @@ export type AnalyzeResponse = {
   scanId?: string; // server-side history id; passed back to /api/lookup
   interpreted?: { mode: Mode; question?: string; language?: string }; // how an utterance was read
   autoLookup?: boolean; // "search for this": run /api/lookup right after
+  brand?: string; // the item's brand (from a printed barcode, or as printed); passed to /api/lookup
+  barcode?: BarcodeResult; // a barcode printed in the photo, found (its sections arrive merged)
   httpStatus?: number; // set by the client
   page?: import("./logic/book").BookPage; // book mode
   error?: boolean;
@@ -158,5 +160,6 @@ export type BarcodeResult = {
   itemKind?: ItemKind;
   image?: string;
   title?: string;
+  brand?: string;
   scanId?: string;
 };

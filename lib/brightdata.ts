@@ -119,9 +119,19 @@ async function fetchSerp(
   return data;
 }
 
+/** A picture with the words Google showed with it (title, alt text, site), to check what it is. */
+export type ImageCandidate = { url: string; text: string };
+
+function imageText(img: Record<string, unknown>): string {
+  return [img.title, img.image_alt, img.source, img.original_image]
+    .map((v) => asText(v, 300))
+    .join(" ");
+}
+
 export type WebSearch = {
   results: SearchResult[];
   image?: string; // the first picture Google showed for the query (usually a small thumbnail)
+  images?: ImageCandidate[]; // every picture in Google's image strip, in order
 };
 
 /** One Google search through Bright Data. Throws on network or API errors and empty replies. */
@@ -159,10 +169,15 @@ async function searchOnce(
   for (const r of results) {
     if (!r.thumbnail && imageFor.has(r.url)) r.thumbnail = imageFor.get(r.url);
   }
-  const first = images
-    .map((img) => pickImage(img.image_url, img.image, img.image_base64))
-    .find(Boolean);
-  return { results: results.slice(0, opts.limit ?? 7), ...(first ? { image: first } : {}) };
+  const strip: ImageCandidate[] = [];
+  for (const img of images) {
+    const url = pickImage(img.image_url, img.image, img.image_base64);
+    if (url) strip.push({ url, text: imageText(img) });
+  }
+  return {
+    results: results.slice(0, opts.limit ?? 7),
+    ...(strip.length ? { image: strip[0].url, images: strip } : {}),
+  };
 }
 
 const HEDGE_AFTER_MS = 3_500;
@@ -230,31 +245,36 @@ export async function searchWeb(
 }
 
 /**
- * One picture of the item (a product packshot, a restaurant photo) from Google Images.
- * Prefers the full-size https image; falls back to a small inline thumbnail. Never throws.
+ * Pictures of the item (a product packshot, a restaurant photo) from Google Images, best first,
+ * each with the words shown with it so the caller can check it's the right item.
+ * Prefers full-size https images from ordinary sites; then other full-size images that load;
+ * then small inline thumbnails. Never throws (resolves [] on failure).
  */
-export async function searchImage(query: string, timeoutMs: number): Promise<string | undefined> {
+export async function searchImage(query: string, timeoutMs: number): Promise<ImageCandidate[]> {
   try {
     const data = await fetchSerp(query, { images: true, signal: AbortSignal.timeout(timeoutMs) });
-    const images = Array.isArray(data.images) ? (data.images as Record<string, unknown>[]) : [];
-    // Prefer direct image files from ordinary sites; social-media crawler links often won't load.
-    const urls = images
-      .slice(0, 8)
-      .map((img) => pickImage(img.original_image))
-      .filter((u): u is string => Boolean(u) && !u!.startsWith("data:"));
-    const direct = urls.find(
-      (u) =>
-        /\.(jpe?g|png|webp)(\?|$)/i.test(u) &&
-        !/instagram|facebook|fbcdn|fbsbx|lookaside|tiktok|pinimg/i.test(u),
-    );
-    const usable = direct ?? urls.find((u) => !/lookaside|fbsbx/i.test(u));
-    if (usable) return usable;
-    for (const img of images.slice(0, 3)) {
-      const thumb = pickImage(img.image, img.image_base64);
-      if (thumb) return thumb;
+    const images = (Array.isArray(data.images) ? (data.images as Record<string, unknown>[]) : [])
+      .slice(0, 10);
+    const full: ImageCandidate[] = [];
+    for (const img of images) {
+      const url = pickImage(img.original_image);
+      if (url && !url.startsWith("data:")) full.push({ url, text: imageText(img) });
     }
+    // Social-media crawler links often won't load.
+    const direct = full.filter(
+      (c) =>
+        /\.(jpe?g|png|webp)(\?|$)/i.test(c.url) &&
+        !/instagram|facebook|fbcdn|fbsbx|lookaside|tiktok|pinimg/i.test(c.url),
+    );
+    const usable = full.filter((c) => !direct.includes(c) && !/lookaside|fbsbx/i.test(c.url));
+    const thumbs: ImageCandidate[] = [];
+    for (const img of images) {
+      const url = pickImage(img.image, img.image_base64);
+      if (url) thumbs.push({ url, text: imageText(img) });
+    }
+    return [...direct, ...usable, ...thumbs];
   } catch (error) {
     console.warn("Bright Data image search failed:", String(error).slice(0, 160));
   }
-  return undefined;
+  return [];
 }

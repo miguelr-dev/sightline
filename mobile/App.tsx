@@ -343,6 +343,7 @@ function Main() {
       const data = await lookup({
         query,
         itemKind: r.itemKind,
+        brand: r.brand,
         scanId: r.scanId,
         language: lookupLanguage(s.mode, s.language),
         context: { mode: s.mode, spokenText: r.spokenText, details: r.details },

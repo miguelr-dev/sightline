@@ -94,12 +94,15 @@ export type AnalyzeResponse = {
   utterance?: string; // the request's utterance, echoed back (trimmed, max 300 chars)
   interpreted?: { mode: Mode; question?: string; language?: string }; // what it was taken to mean
   autoLookup?: boolean; // "search for this": run /api/lookup now and speak its summary next
+  brand?: string; // the brand: from a barcode printed in the photo, else as printed; absent if unknown
+  barcode?: BarcodeResponse; // a barcode printed in the photo, read and found (its facts are merged)
   error?: boolean;
 };
 
 export type LookupRequest = {
   query?: string; // search query; when empty the server proposes one from `context`
   itemKind?: ItemKind;
+  brand?: string; // from AnalyzeResponse: pictures and facts must be this brand's; empty = unconfirmed
   language?: string; // language name from LANGUAGES; the summary is written in it (default English)
   scanId?: string; // from AnalyzeResponse; the lookup result is saved to that scan
   context?: { mode?: Mode; spokenText?: string; details?: string };
@@ -183,6 +186,7 @@ export type BarcodeResponse = {
   itemKind: ItemKind;
   image?: string;
   title?: string;
+  brand?: string;
   scanId?: string; // with an x-sightline-device header
   cached?: boolean;
   error?: string; // "bad-code" with HTTP 400

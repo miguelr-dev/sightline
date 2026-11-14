@@ -30,6 +30,8 @@ import {
   cleanSections,
   sectionsToText,
 } from "@/lib/claude";
+import { lookupPhotoBarcode, productIdentity, type BarcodeResult } from "@/lib/barcode";
+import { GENERIC_WORDS } from "@/lib/hat";
 
 // Server-only: read a photo with Claude, with the Neon analysis cache and scan history.
 // Used by /api/analyze and by the hat camera's /api/device/frame.
@@ -41,8 +43,10 @@ const OUTPUT_SCHEMA = {
     sections: SECTIONS_SCHEMA,
     itemKind: { type: "string", enum: [...ITEM_KINDS] },
     webQuery: { type: "string" },
+    brand: { type: "string" }, // as printed, or empty
+    barcode: { type: "string" }, // digits printed under a UPC/EAN barcode, or empty
   },
-  required: ["spokenText", "sections", "itemKind", "webQuery"],
+  required: ["spokenText", "sections", "itemKind", "webQuery", "brand", "barcode"],
   additionalProperties: false,
 } as const;
 
@@ -66,7 +70,11 @@ function scanTitle(r: AnalyzeResponse): string {
       .replace(/[.,;:]+$/, "");
     return `${r.page.pageNumber ? `Page ${r.page.pageNumber}: ` : ""}${start}`.slice(0, 80);
   }
-  const fromQuery = (r.webQuery ?? "").replace(ANGLE_WORDS, " ").replace(/\s+/g, " ").trim();
+  const fromQuery = (r.webQuery ?? "")
+    .replace(ANGLE_WORDS, " ")
+    .replace(/\b\d{8,14}\b/g, " ") // a UPC from a barcode in the photo
+    .replace(/\s+/g, " ")
+    .trim();
   if (fromQuery) return fromQuery.slice(0, 80);
   const words = r.spokenText.split(/\s+/).slice(0, 8).join(" ");
   return words.replace(/[.,;:]+$/, "").slice(0, 80);
@@ -158,6 +166,8 @@ type Parsed = {
   sections?: unknown;
   webQuery?: unknown;
   itemKind?: unknown;
+  brand?: unknown;
+  barcode?: unknown;
 };
 
 function fail(spokenText: string, status: number): AnalyzeResult {
@@ -186,9 +196,87 @@ export function cleanConversation(v: unknown): ConversationTurn[] {
   return turns.slice(-MAX_TURNS);
 }
 
-/** Label-read sections are tagged as coming from the photo. */
+/** Sections about what isn't there ("Not visible", "Missing information") say nothing useful. */
+const EMPTY_SECTION = /not visible|missing|unknown|not shown/i;
+
+/** Label-read sections are tagged as coming from the photo; "nothing here" sections are dropped. */
 function fromLabel(sections: { title: string; body: string }[]): Section[] {
-  return sections.map((s) => ({ ...s, provenance: "label" as const }));
+  return sections
+    .filter((s) => !EMPTY_SECTION.test(s.title))
+    .map((s) => ({ ...s, provenance: "label" as const }));
+}
+
+const MAX_SPOKEN_WORDS = 25;
+const SAFETY = /warning|caution|recall|allerg|contains|may contain|not recommended|keep out|danger|do not|don't/i;
+// Container words a brandless name adds ("energy drink can"), for spotting a redundant name.
+const CONTAINER_WORDS = new Set(["can", "cans", "bottle", "box", "bag", "pack", "package", "jar"]);
+
+function wordCount(s: string): number {
+  return s.split(/\s+/).filter(Boolean).length;
+}
+
+function sentences(s: string): string[] {
+  return s.match(/[^.!?]+[.!?]+["')]*|[^.!?]+$/g)?.map((x) => x.trim()).filter(Boolean) ?? [];
+}
+
+/**
+ * Spoken answer for a product identified by its printed barcode: the exact name and brand first,
+ * then the barcode's key facts (a recall; sugar and caffeine) if the photo's answer lacks them,
+ * then the model's own sentences. Unchanged if the model already named the brand. A first
+ * sentence that is only a generic name ("Sparkling Tropical energy drink can.") is dropped as
+ * redundant, and sentences are dropped from the end to stay within 25 words, never a safety line.
+ */
+export function withIdentity(spoken: string, b: BarcodeResult): string {
+  const identity = productIdentity(b);
+  if (!identity) return spoken;
+  const brand = (b.brand ?? "").toLowerCase();
+  if (brand && spoken.toLowerCase().includes(brand)) return spoken;
+  const known = new Set(identity.toLowerCase().split(/[^a-z0-9]+/));
+  let rest = sentences(spoken);
+  const lead = rest[0]?.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean) ?? [];
+  if (lead.length && lead.every((w) => known.has(w) || GENERIC_WORDS.has(w) || CONTAINER_WORDS.has(w))) {
+    rest = rest.slice(1);
+  }
+  const said = sentences(b.spokenText);
+  // A recall is a safety line and always goes in, right after the name.
+  const recall = /recall/i.test(spoken) ? [] : said.filter((x) => /\brecalled\b/i.test(x));
+  // Sugar and caffeine, unless the photo's answer already gives numbers for them; shorter
+  // versions are tried before leaving them out.
+  const headline = /\d[^.]*\b(caffeine|sugar)/i.test(spoken)
+    ? undefined
+    : said.find((x) => /\bper (serving|100 grams)\.$/i.test(x));
+  const per = headline?.match(/\bper (serving|100 grams)\.$/i)?.[0] ?? "";
+  const part = (re: RegExp) => headline?.match(re)?.[0];
+  const variants = [
+    headline,
+    ...[part(/\d+ milligrams of caffeine/i), part(/\d+(\.\d+)? grams? of sugar/i)].map((x) =>
+      x ? `${x[0].toUpperCase()}${x.slice(1)} ${per}` : undefined,
+    ),
+  ].filter((x, i, all): x is string => Boolean(x) && all.indexOf(x) === i);
+
+  let out: string[] = [];
+  for (const fact of [...variants, undefined]) {
+    out = [`${identity}.`, ...recall, ...(fact ? [fact] : []), ...rest];
+    const fixed = 1 + recall.length + (fact ? 1 : 0); // never dropped
+    for (let i = out.length - 1; i >= fixed && wordCount(out.join(" ")) > MAX_SPOKEN_WORDS; i--) {
+      if (!SAFETY.test(out[i])) out.splice(i, 1);
+    }
+    if (wordCount(out.join(" ")) <= MAX_SPOKEN_WORDS) break;
+  }
+  return out.join(" ");
+}
+
+/** "Nutrition (per serving)" -> "Nutrition, per serving (from barcode)". */
+function barcodeSections(b: BarcodeResult, have: Section[]): Section[] {
+  const base = (t: string) => t.toLowerCase().split(/[\s(,]/)[0];
+  const taken = new Set(have.map((s) => base(s.title)));
+  return b.sections
+    .filter((s) => s.title !== "Score" && !taken.has(base(s.title)))
+    .map((s) => ({
+      title: `${s.title.replace(/\s*\(([^)]*)\)/, ", $1")} (from barcode)`,
+      body: s.body,
+      provenance: "label" as const,
+    }));
 }
 
 export async function analyzePhoto(input: AnalyzeInput): Promise<AnalyzeResult> {
@@ -315,14 +403,16 @@ export async function analyzePhoto(input: AnalyzeInput): Promise<AnalyzeResult> 
       typeof parsed.spokenText === "string" && parsed.spokenText.trim()
         ? parsed.spokenText.trim()
         : "I couldn't make out anything in that photo. Please try again.";
-    const sections = fromLabel(cleanSections(parsed.sections));
-    const itemKind: ItemKind = ITEM_KINDS.includes(parsed.itemKind as ItemKind)
+    let sections = fromLabel(cleanSections(parsed.sections));
+    let itemKind: ItemKind = ITEM_KINDS.includes(parsed.itemKind as ItemKind)
       ? (parsed.itemKind as ItemKind)
       : "none";
-    const webQuery =
+    let webQuery =
       itemKind !== "none" && typeof parsed.webQuery === "string"
         ? parsed.webQuery.trim().slice(0, 200)
         : "";
+    let brand = typeof parsed.brand === "string" ? parsed.brand.trim().slice(0, 80) : "";
+    let spoken = spokenText;
 
     // Auto: the mode the model chose, checked here; anything unexpected becomes describe.
     const chosen: Mode =
@@ -332,14 +422,45 @@ export async function analyzePhoto(input: AnalyzeInput): Promise<AnalyzeResult> 
           ? (parsed.chosenMode as Mode)
           : "describe";
 
+    // Barcode digits printed in the photo (not in Translate, not for questions): the product's
+    // exact identity and facts from the barcode lookup, if it answers within 2.5 s.
+    const found =
+      chosen !== "translate" && !followUp ? await lookupPhotoBarcode(parsed.barcode) : undefined;
+    if (found) {
+      const identity = productIdentity(found);
+      spoken = withIdentity(spoken, found);
+      sections = [...sections, ...barcodeSections(found, sections)];
+      brand = found.brand ?? brand;
+      if (itemKind === "none") itemKind = found.itemKind === "none" ? "product" : found.itemKind;
+      if (identity) {
+        webQuery = `${identity.replace(/[^\p{L}\p{N}&'.]+/gu, " ").trim()} ${found.code}`;
+      }
+    }
+
     return finish(
       {
-        spokenText,
+        spokenText: spoken,
         sections,
         details: sectionsToText(sections),
         webQuery,
         itemKind,
         mode: chosen,
+        ...(brand ? { brand } : {}),
+        ...(found
+          ? {
+              barcode: {
+                code: found.code,
+                found: true,
+                ...(found.source ? { source: found.source } : {}),
+                spokenText: found.spokenText,
+                sections: found.sections,
+                itemKind: found.itemKind,
+                ...(found.image ? { image: found.image } : {}),
+                ...(found.title ? { title: found.title } : {}),
+                ...(found.brand ? { brand: found.brand } : {}),
+              },
+            }
+          : {}),
       },
       { ...ctx, mode: chosen, cached: false },
       persist,

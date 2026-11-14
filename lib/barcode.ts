@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { ITEM_KINDS, type ItemKind, type Section } from "./modes";
 import { brightDataConfigured, searchWeb } from "./brightdata";
 import { SECTIONS_SCHEMA, askJson, cleanSections, fastModel } from "./claude";
+import { getCachedBarcode, putCachedBarcode } from "./db";
 
 // Server-only: barcode lookup for grocery shopping. Open Food Facts first (food and drink),
 // openFDA for US drug UPCs (with recalls first), then a web search summarized by Claude.
@@ -18,6 +19,7 @@ export type BarcodeResult = {
   itemKind: ItemKind;
   image?: string;
   title?: string;
+  brand?: string; // the maker's brand, when the source lists it separately from the title
 };
 
 const USER_AGENT = "SightLine/0.1 (hackathon accessibility app)";
@@ -51,7 +53,7 @@ export function validBarcode(raw: unknown): string | null {
 }
 
 /** Bump when how answers are built changes, so cached answers from older code aren't reused. */
-export const BARCODE_VERSION = "b3";
+export const BARCODE_VERSION = "b4"; // b4: results carry `brand`
 
 /** The cache key: GTIN-14 (so 12- and 13-digit forms share it), language and version. */
 export function barcodeCacheKey(code: string, language: string): string {
@@ -365,6 +367,7 @@ export function fromOpenFoodFacts(json: unknown): BarcodeResult | null {
     found: true,
     source: "openfoodfacts",
     title: name,
+    ...(brand ? { brand: tidyName(brand) } : {}),
     spokenText: parts.join(" "),
     sections,
     itemKind: "food_drink",
@@ -487,7 +490,15 @@ export function fromOpenFda(label: FdaLabel, recalls: FdaRecall[]): BarcodeResul
   } else {
     spokenText = `${title}${what ? `, ${what}` : ""}. No recalls found.`;
   }
-  return { found: true, source: "openfda", title, spokenText, sections, itemKind: "medicine" };
+  return {
+    found: true,
+    source: "openfda",
+    title,
+    ...(brand ? { brand } : {}),
+    spokenText,
+    sections,
+    itemKind: "medicine",
+  };
 }
 
 async function fdaJson(path: string): Promise<{ results?: unknown[] } | null> {
@@ -698,4 +709,52 @@ export async function translateBarcode(r: BarcodeResult, language: string): Prom
   } catch {
     return r;
   }
+}
+
+// ---------- A barcode printed in a photo ----------
+
+/** How long an analyze answer waits for the lookup of a barcode read from the photo. */
+export const PHOTO_BARCODE_TIMEOUT_MS = 2_500;
+
+/** The product's exact name with its brand: "Kirkland Energy Drink, Tropical". */
+export function productIdentity(r: BarcodeResult): string {
+  const title = str(r.title).replace(/\s+-\s+/g, ", ");
+  const brand = str(r.brand);
+  if (!title) return brand;
+  if (!brand || title.toLowerCase().includes(brand.toLowerCase())) return title;
+  return `${brand} ${title}`;
+}
+
+/**
+ * Look up a barcode read from a photo: the barcode cache first (shared with /api/barcode), then
+ * the sources. A fresh answer is cached when it arrives, even after the caller stopped waiting.
+ * Resolves undefined if the code is invalid, nothing was found, or it took over `timeoutMs`.
+ */
+export async function lookupPhotoBarcode(
+  raw: unknown,
+  timeoutMs = PHOTO_BARCODE_TIMEOUT_MS,
+): Promise<(BarcodeResult & { code: string }) | undefined> {
+  const code = validBarcode(raw);
+  if (!code) return undefined;
+  const key = barcodeCacheKey(code, "English");
+  const work = (async () => {
+    const hit = await getCachedBarcode(key);
+    if (hit) return hit;
+    const fresh = await lookupBarcode(code);
+    await putCachedBarcode(key, fresh).catch(() => {});
+    return fresh;
+  })().catch((error) => {
+    console.warn("Photo barcode lookup failed:", String(error).slice(0, 160));
+    return undefined;
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => {
+      console.warn(`Photo barcode ${code}: no answer in ${timeoutMs} ms, answering without it`);
+      resolve(undefined);
+    }, timeoutMs);
+  });
+  const r = await Promise.race([work, timeout]);
+  clearTimeout(timer);
+  return r?.found ? { ...r, code } : undefined;
 }
