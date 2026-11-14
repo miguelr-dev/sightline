@@ -17,7 +17,13 @@ Rules:
 
 const MODE_INSTRUCTIONS: Record<Mode, (language: string) => string> = {
   read: () => `Mode: Read.
-Read all the visible text in natural reading order: headings first, then body text, top to bottom, left to right, grouping text that belongs together.
+First decide what the user is pointing the camera at.
+
+If there is a clear main item, read only the text on that item and ignore text in the background. A clear item is something held in a hand, close to the camera, or centered and filling a good part of the frame: a letter, a package, a bottle, a receipt, a book page, a screen. Do not read signs, posters, labels, or screens behind or around it. If part of the item's text is cut off, covered by a finger, or turned away, say which part and how to fix it, for example "The bottom of the page is cut off. Move the phone back a little."
+
+If there is no single main item, for example the camera shows a wall of signs or a storefront, read all the visible text.
+
+Read in natural reading order: headings first, then body text, top to bottom, left to right, grouping text that belongs together.
 - spokenText: if the text is under about 120 words, read it in full. If it is longer, first say in one short sentence what kind of document it is and roughly how long, then read the first part, then say "The full text is in the details."
 - details: the complete transcription, keeping line breaks.
 If there is no readable text, say so and briefly say what the photo shows instead.`,
