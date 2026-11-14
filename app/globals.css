@@ -5,9 +5,13 @@
 :root {
   --background: #000000;
   --foreground: #ffffff;
+  --surface: rgba(10, 10, 10, 0.92);
   --muted: #e5e5e5;
   --accent: #ffd60a;
+  --accent-strong: #ffe14d;
   --focus: #5ce1ff;
+  --live: #ff5c5c;
+  --danger: #ff8a8a;
   color-scheme: dark;
 }
 
@@ -23,7 +27,8 @@ html {
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  /* Atkinson Hyperlegible was designed by the Braille Institute for low-vision readers. */
+  font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
 }
 
 @media (prefers-reduced-motion: reduce) {

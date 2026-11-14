@@ -11,10 +11,10 @@ export const MODE_LABELS: Record<Mode, string> = {
 };
 
 export const MODE_HINTS: Record<Mode, string> = {
-  read: "Reads all visible text aloud.",
-  describe: "Describes the scene in front of you.",
-  menu: "Summarizes a menu, product, or medicine label.",
-  translate: "Reads the text and translates it.",
+  read: "Reads the text on the item you are showing, or all visible text if there is no single item.",
+  describe: "Describes the item you are showing, or the scene if there is no single item.",
+  menu: "Summarizes the menu, product, or medicine label you are showing.",
+  translate: "Translates the sign, menu, or label you are showing into your language.",
 };
 
 export type Language = { name: string; code: string };

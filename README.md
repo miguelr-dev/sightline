@@ -2,7 +2,12 @@
 
 **Point your camera. Hear the world.**
 
-SightLine is a mobile-first web app (installable as a PWA) that helps blind and low-vision people understand what's in front of them. Point your phone at something, tap one big button or say a voice command, and SightLine reads text aloud, describes the scene, explains a menu or medicine label, or translates a sign.
+SightLine is a mobile-first web app (installable as a PWA) that reads the world out loud. Point your phone at something, tap one big button or say a voice command, and SightLine reads the text aloud, describes what you're holding, explains a menu or medicine label, or translates a sign.
+
+It's built for two kinds of people:
+
+- **Can't see it?** Blind and low-vision people get text and objects read and described out loud.
+- **Can't read it?** Travelers get signs, menus, and labels in another language translated into their own, spoken by a voice for that language.
 
 <!-- TODO: add screenshots / a GIF of the app here -->
 _Screenshots coming soon._
@@ -12,7 +17,7 @@ _Screenshots coming soon._
 At least 2.2 billion people worldwide have a near or distance vision impairment, according to the World Health Organization ([WHO fact sheet: Blindness and vision impairment](https://www.who.int/news-room/fact-sheets/detail/blindness-and-visual-impairment)).
 <!-- TODO: confirm this figure against the current WHO fact sheet before presenting, and add a stat closer to our users if we have one. -->
 
-Everyday printed information (menus, medicine labels, street signs, mail) still assumes you can see it. Existing tools often need a dedicated app install, a specific phone, or a human volunteer on call. SightLine runs in any modern mobile browser and answers in a few seconds.
+Everyday printed information (menus, medicine labels, street signs, mail) still assumes you can see it, and that you can read the local language. A traveler in a foreign city faces the same wall of unreadable signs and menus that a low-vision person faces every day. Existing tools often need a dedicated app install, a specific phone, or a human volunteer on call. SightLine runs in any modern mobile browser and answers in a few seconds.
 
 ## Features
 
