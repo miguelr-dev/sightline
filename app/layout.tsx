@@ -14,6 +14,14 @@ export const metadata: Metadata = {
   description:
     "Point your camera. Hear the world. An AI accessibility copilot for blind and low-vision users.",
   applicationName: "SightLine",
+  openGraph: {
+    title: "SightLine: Point. Hear. Know.",
+    description:
+      "An AI copilot for blind and low-vision people. Point your phone at a menu, medicine or sign and hear what matters.",
+    type: "website",
+    siteName: "SightLine",
+  },
+  twitter: { card: "summary_large_image" },
   appleWebApp: { capable: true, title: "SightLine", statusBarStyle: "black-translucent" },
   icons: {
     icon: [

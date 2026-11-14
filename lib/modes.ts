@@ -47,10 +47,129 @@ export type AnalyzeRequest = {
   mode: Mode;
   language?: string; // language name, used by Translate
   question?: string; // follow-up question about the same image
+  key?: string; // optional target id from /api/frame-check, stored with the scan
 };
 
+// What kind of thing the photo shows, which decides what a web lookup looks for.
+export const ITEM_KINDS = [
+  "none",
+  "food_drink",
+  "product",
+  "medicine",
+  "restaurant",
+  "book",
+  "place",
+] as const;
+export type ItemKind = (typeof ITEM_KINDS)[number];
+
+/** A titled block of extra information, shown on screen and read on request. */
+export type Section = { title: string; body: string };
+
 export type AnalyzeResponse = {
-  spokenText: string;
-  details: string;
+  spokenText: string; // the gist, about 30 words; recalls, warnings and allergens always kept
+  sections?: Section[]; // item-dependent detail, 0 to 6 sections
+  details: string; // flat fallback: the sections joined as plain text
+  webQuery?: string; // short search query for a web lookup, empty when nothing is identifiable
+  itemKind?: ItemKind;
+  scanId?: string; // history entry for this scan (only with an x-sightline-device header)
+  cached?: boolean; // true when this exact photo and request were answered before
   error?: boolean;
+};
+
+export type LookupRequest = {
+  query?: string; // search query; when empty the server proposes one from `context`
+  itemKind?: ItemKind;
+  language?: string; // language name from LANGUAGES; the summary is written in it (default English)
+  scanId?: string; // from AnalyzeResponse; the lookup result is saved to that scan
+  context?: { mode?: Mode; spokenText?: string; details?: string };
+};
+
+export type LookupSource = {
+  title: string;
+  url: string;
+  thumbnail?: string; // https image URL, or a small data: URI
+};
+
+export type LookupResponse = {
+  spokenText: string;
+  sections?: Section[]; // for example "Nutrition" or "Reviews" from the web
+  details: string;
+  query: string;
+  itemKind?: ItemKind;
+  image?: string; // one hero image of the item (https URL, or a small data: URI)
+  sources: LookupSource[];
+  skipped?: boolean; // web lookup isn't configured or there was nothing to search for
+  cached?: boolean; // true when served from the lookup cache
+  error?: boolean;
+};
+
+export type HistoryScan = {
+  id: string;
+  createdAt: string; // ISO timestamp
+  mode: Mode;
+  itemKind: string | null;
+  key: string | null;
+  title: string | null;
+  spokenText: string;
+  sections: Section[];
+  lookup: LookupResponse | null;
+  imageUrl: string | null;
+};
+export type HistoryResponse = { scans: HistoryScan[] };
+
+export type AskRequest = {
+  question: string; // e.g. "What were the allergens on the cookies I scanned earlier?"
+  language?: string; // language name from LANGUAGES for the answer (default English)
+  timeZone?: string; // IANA zone for "today" and "yesterday" (default America/Los_Angeles)
+};
+
+export type AskResponse = {
+  spokenText: string; // short spoken answer
+  sections?: Section[]; // optional supporting detail
+  scans?: { id: string; title: string | null; createdAt: string }[]; // scans the answer is based on
+  error?: boolean;
+};
+
+/** A spoken command for the hat camera, sent by the paired phone to /api/device/command. */
+export type HatCommandType = "read" | "describe" | "menu" | "translate" | "question" | "lookup";
+export type HatCommand = { type: HatCommandType; question?: string; language?: string };
+
+export type DeviceCommandRequest = {
+  device: string; // hat id
+  pair: string; // the hat's pair code
+  text?: string; // what the user said; parsed with parseCommand when `command` is absent
+  command?: HatCommand;
+};
+
+export type DeviceCommandResponse =
+  | { accepted: true; commandId: string }
+  | { accepted: false; reason: "no-frame" | "unpaired" | "bad-command" };
+
+export type FrameCheckRequest = {
+  image: string; // base64 JPEG, about 512 px, no data: prefix
+  mode: Mode;
+  language?: string;
+};
+
+export type FrameCheckResponse = {
+  ready: boolean; // the target's main text can be read now (edges cut, angle or glare are fine)
+  detected: boolean; // a readable target (product, package, menu, sign, label, document) is in view at all
+  key?: string; // short stable identity of the target, e.g. "harbor-table-menu"
+  label?: string; // short spoken name, e.g. "Nutter Butter cookies", "Lunch menu"
+  suggestedMode?: Mode; // best mode for the target
+  confidence?: number; // 0 to 1, how sure the model is about `ready`
+  hint?: string; // one short spoken framing tip when detected but not ready; otherwise empty
+};
+
+export type Voice = { id: string; name: string; description?: string; previewUrl?: string };
+export type VoicesResponse = { voices: Voice[] };
+
+export type Features = {
+  elevenlabs: boolean; // ElevenLabs text-to-speech is configured
+  transcribe: boolean; // ElevenLabs speech-to-text is configured
+  lookup: boolean; // Bright Data web lookup is configured
+  history: boolean; // Neon Postgres is configured (scan history and caches)
+  ask: boolean; // "Ask your history" agent is available (/api/ask)
+  hat: boolean; // hat camera routes are set up (DEVICE_SHARED_KEY and DATABASE_URL)
+  hatCommands: boolean; // the hat camera takes voice commands (/api/device/command)
 };
