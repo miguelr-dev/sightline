@@ -83,6 +83,17 @@ Only state what the results say. Never invent prices, ratings, dates, nutrition 
 const ANGLE_WORDS =
   /\b(nutrition|facts|caffeine|sugar|price|uses|recalls?|fda|warnings?|reviews?|menu|hours|allergens?|summary|information)\b/gi;
 
+/** "Tylenol Extra Strength 500 mg uses recall FDA warning" -> "Tylenol Extra Strength". */
+function medicineName(query: string): string {
+  return imageQuery(query)
+    .replace(/\b\d+(\.\d+)?\s*(mg|mcg|g|ml|oz|iu|count|ct)\b/gi, " ")
+    .replace(/\b(tablets?|caplets?|capsules?|softgels?|gelcaps?|liquid)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const RECALL_GRACE_MS = 1_500; // how long the answer waits for the FDA search after the main one
+
 function imageQuery(query: string): string {
   return query.replace(ANGLE_WORDS, " ").replace(/\s+/g, " ").trim() || query;
 }
@@ -212,21 +223,48 @@ export async function webLookup(
     // 3. Google results through Bright Data, with a picture of the item searched in parallel.
     const imagePromise =
       kind !== "none" ? searchImage(imageQuery(query), Math.max(2_000, remaining() - 1_000)) : null;
+    const searchMs = Math.max(3_000, deadline - Date.now() - SUMMARY_RESERVE_MS);
+    // Medicine: also ask FDA directly about recalls, in parallel, so "recall first" is reliable.
+    const name = kind === "medicine" ? medicineName(query) : "";
+    const recallSearch: Promise<SearchResult[]> = name
+      ? searchWeb(`site:fda.gov OR site:accessdata.fda.gov "${name}" recall`, {
+          timeoutMs: searchMs,
+        }).then(
+          (r) => r.results.slice(0, 3),
+          (error) => {
+            console.warn("FDA recall search failed:", String(error).slice(0, 160));
+            return [];
+          },
+        )
+      : Promise.resolve([]);
+    const recallResults = () =>
+      Promise.race([
+        recallSearch,
+        new Promise<SearchResult[]>((r) => setTimeout(() => r([]), RECALL_GRACE_MS)),
+      ]);
+
     let results: SearchResult[];
     let serpImage: string | undefined;
     try {
-      ({ results, image: serpImage } = await searchWeb(query, {
-        timeoutMs: Math.max(3_000, deadline - Date.now() - SUMMARY_RESERVE_MS),
-      }));
+      ({ results, image: serpImage } = await searchWeb(query, { timeoutMs: searchMs }));
     } catch (error) {
       console.error("Bright Data search failed:", error);
-      const timedOut = error instanceof DOMException && error.name === "TimeoutError";
-      return fail(
-        timedOut
-          ? "The web search took too long, so I stopped it."
-          : "I couldn't search the web just now.",
-        query,
-      );
+      results = await recallResults(); // the FDA search may still have answered
+      if (!results.length) {
+        const timedOut = error instanceof DOMException && error.name === "TimeoutError";
+        return fail(
+          timedOut
+            ? "The web search took too long, so I stopped it."
+            : "I couldn't search the web just now.",
+          query,
+        );
+      }
+    }
+    if (name) {
+      // FDA recall results first, then the rest, without duplicates.
+      const recall = await recallResults();
+      const seen = new Set(recall.map((r) => r.url));
+      results = [...recall, ...results.filter((r) => !seen.has(r.url))].slice(0, 8);
     }
     if (!results.length) {
       return reply({

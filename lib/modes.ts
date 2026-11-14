@@ -48,6 +48,7 @@ export type AnalyzeRequest = {
   language?: string; // language name, used by Translate
   question?: string; // follow-up question about the same image
   key?: string; // optional target id from /api/frame-check, stored with the scan
+  utterance?: string; // "ask while looking": what the user said with this fresh photo (max 300 chars)
 };
 
 // What kind of thing the photo shows, which decides what a web lookup looks for.
@@ -73,6 +74,9 @@ export type AnalyzeResponse = {
   itemKind?: ItemKind;
   scanId?: string; // history entry for this scan (only with an x-sightline-device header)
   cached?: boolean; // true when this exact photo and request were answered before
+  utterance?: string; // the request's utterance, echoed back (trimmed, max 300 chars)
+  interpreted?: { mode: Mode; question?: string; language?: string }; // what it was taken to mean
+  autoLookup?: boolean; // "search for this": run /api/lookup now and speak its summary next
   error?: boolean;
 };
 
@@ -149,6 +153,8 @@ export type FrameCheckRequest = {
   image: string; // base64 JPEG, about 512 px, no data: prefix
   mode: Mode;
   language?: string;
+  lastKey?: string; // the key from the previous frame, so the same item keeps its key
+  lastLabel?: string;
 };
 
 export type FrameCheckResponse = {

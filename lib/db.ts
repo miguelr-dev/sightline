@@ -80,6 +80,8 @@ export const SCHEMA = [
     phone_device text NOT NULL,
     paired_at timestamptz NOT NULL DEFAULT now()
   )`,
+  // Pairing is sticky: last_seen is the paired phone's last poll (see claimPairing).
+  `ALTER TABLE device_pairs ADD COLUMN IF NOT EXISTS last_seen timestamptz NOT NULL DEFAULT now()`,
 ];
 
 let client: Sql | null | undefined;
@@ -552,4 +554,46 @@ export async function pairHat(device: string, phone: string) {
       db`INSERT INTO device_pairs (device_id, phone_device) VALUES (${device}, ${phone})
          ON CONFLICT (device_id) DO UPDATE SET phone_device = EXCLUDED.phone_device, paired_at = now()`,
   );
+}
+
+/** How long the paired phone can go without polling before another phone may take the hat. */
+export const PAIRING_STALE_SECONDS = 60;
+
+/**
+ * Pair `phone` with the hat, or keep it paired, and note that it just polled. The first phone
+ * stays paired until it unpairs or stops polling for PAIRING_STALE_SECONDS; until then other
+ * phones get "elsewhere". Atomic, so two pollers can't flip the pairing back and forth.
+ * Undefined if the database can't be reached.
+ */
+export async function claimPairing(
+  device: string,
+  phone: string,
+): Promise<"ok" | "elsewhere" | undefined> {
+  const rows = await withDb(
+    "hat pairing",
+    (db) =>
+      db`INSERT INTO device_pairs (device_id, phone_device, paired_at, last_seen)
+         VALUES (${device}, ${phone}, now(), now())
+         ON CONFLICT (device_id) DO UPDATE SET
+           phone_device = EXCLUDED.phone_device,
+           paired_at = CASE WHEN device_pairs.phone_device = EXCLUDED.phone_device
+                            THEN device_pairs.paired_at ELSE now() END,
+           last_seen = now()
+         WHERE device_pairs.phone_device = EXCLUDED.phone_device
+            OR device_pairs.last_seen < now() - make_interval(secs => ${PAIRING_STALE_SECONDS})
+         RETURNING phone_device`,
+  );
+  if (rows === undefined) return undefined;
+  return rows.length ? "ok" : "elsewhere";
+}
+
+/** Unpair the hat, but only if `phone` is the one paired with it. */
+export async function unpairHat(device: string, phone: string): Promise<boolean> {
+  const rows = await withDb(
+    "hat unpair",
+    (db) =>
+      db`DELETE FROM device_pairs WHERE device_id = ${device} AND phone_device = ${phone}
+         RETURNING device_id`,
+  );
+  return Boolean(rows?.length);
 }

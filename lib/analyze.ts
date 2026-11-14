@@ -61,6 +61,8 @@ export type AnalyzeInput = {
   mode: Mode;
   language: string; // a name from LANGUAGES
   question?: string;
+  /** false: the question comes with a fresh photo ("ask while looking"), not a follow-up. */
+  isFollowUp?: boolean;
   key?: string; // target id from a frame check, saved with the scan
   device?: string; // history owner (the phone's x-sightline-device ID)
   /** "after" (default): write cache and history after the response is sent. "await": write now.
@@ -142,7 +144,8 @@ export async function analyzePhoto(input: AnalyzeInput): Promise<AnalyzeResult> 
       image: data,
       mode,
       language: targetLanguage,
-      question: followUp,
+      // A fresh question gets different wording, so it mustn't reuse a follow-up's cached answer.
+      question: followUp && input.isFollowUp === false ? `fresh:${followUp}` : followUp,
       model,
       version: PROMPT_VERSION,
     }),
@@ -167,7 +170,7 @@ export async function analyzePhoto(input: AnalyzeInput): Promise<AnalyzeResult> 
       system: systemPrompt(mode, targetLanguage),
       content: [
         { type: "image", source: { type: "base64", media_type: imageMediaType(data), data } },
-        { type: "text", text: userPrompt(mode, targetLanguage, followUp) },
+        { type: "text", text: userPrompt(mode, targetLanguage, followUp, { isFollowUp: input.isFollowUp }) },
       ],
       schema: OUTPUT_SCHEMA,
     });

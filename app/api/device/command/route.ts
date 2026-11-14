@@ -12,7 +12,7 @@ import { parseCommand } from "@/lib/voice";
 import { checkPairCode, matchKey, sharedKey, validHatId } from "@/lib/hat";
 import { readJson } from "@/lib/http";
 import { addDeviceEvent, claimHatRead, dbConfigured, deviceId, pairedPhone } from "@/lib/db";
-import { getFrame, waitForFrame } from "@/lib/frameStore";
+import { getFrame, noteCommand, waitForFrame } from "@/lib/frameStore";
 import { analyzePhoto } from "@/lib/analyze";
 import { webLookup } from "@/lib/lookup";
 
@@ -96,6 +96,7 @@ export async function POST(request: Request) {
   if (!getFrame(hat)) return reject("no-frame");
 
   const commandId = randomUUID();
+  noteCommand(hat); // the hat's own auto-read stays quiet while this is answered
   console.log(`[hat-command] ${hat} ${JSON.stringify(command)} id=${commandId.slice(0, 8)}`);
   after(() => runCommand(hat, phone, commandId, command));
   return json({ accepted: true, commandId } satisfies DeviceCommandResponse);

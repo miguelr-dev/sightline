@@ -4,7 +4,9 @@ import {
   TTL_MS,
   WAIT_MS,
   annotateFrame,
+  commandActive,
   getFrame,
+  noteCommand,
   putFrame,
   resetFrameStore,
   waitForFrame,
@@ -66,6 +68,21 @@ describe("frame store (latest hat frame, in memory only)", () => {
     expect(getFrame("hat-01")).toBeDefined();
     vi.advanceTimersByTime(2);
     expect(getFrame("hat-01")).toBeUndefined();
+  });
+
+  it("remembers a recent voice command for a hat, for 10 seconds", () => {
+    expect(commandActive("hat-01")).toBe(false);
+    noteCommand("hat-01");
+    expect(commandActive("hat-01")).toBe(true);
+    expect(commandActive("hat-02")).toBe(false);
+    vi.advanceTimersByTime(10_001);
+    expect(commandActive("hat-01")).toBe(false);
+  });
+
+  it("forgets commands when the store is reset", () => {
+    noteCommand("hat-01");
+    resetFrameStore();
+    expect(commandActive("hat-01")).toBe(false);
   });
 
   it("keeps the frame check result with the frame it belongs to", () => {

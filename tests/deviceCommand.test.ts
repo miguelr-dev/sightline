@@ -25,7 +25,7 @@ import * as db from "@/lib/db";
 import { analyzePhoto } from "@/lib/analyze";
 import { webLookup } from "@/lib/lookup";
 import { pairCode } from "@/lib/hat";
-import { putFrame, resetFrameStore } from "@/lib/frameStore";
+import { commandActive, putFrame, resetFrameStore } from "@/lib/frameStore";
 
 const KEY = "test-shared-key-for-unit-tests";
 const HAT = "hat-01";
@@ -175,6 +175,12 @@ describe("POST /api/device/command", () => {
         update: "lookup",
         lookup: { spokenText: "From the web: Harbor Table is open 11 to 2." },
       });
+    });
+
+    it("marks the hat as busy with a command, so its auto-read stays quiet", async () => {
+      putFrame(HAT, FRAME);
+      await POST(command({ text: "read this" }));
+      expect(commandActive(HAT)).toBe(true);
     });
 
     it("an explicit command reads even the target that was just read (claims with force)", async () => {

@@ -70,6 +70,8 @@ const SCHEMA = [
     phone_device text NOT NULL,
     paired_at timestamptz NOT NULL DEFAULT now()
   )`,
+  // Pairing is sticky: last_seen is the paired phone's last poll (see claimPairing).
+  `ALTER TABLE device_pairs ADD COLUMN IF NOT EXISTS last_seen timestamptz NOT NULL DEFAULT now()`,
 ];
 
 if (!process.env.DATABASE_URL) {
