@@ -3,6 +3,7 @@ import * as Speech from "expo-speech";
 import { File, Paths } from "expo-file-system";
 import { speakClip } from "./api";
 import { ClipCache } from "./logic/clipCache";
+import { speakableUnits } from "./logic/speechText";
 
 // Speech output. ElevenLabs voices through /api/speak, played with expo-audio, one sentence-sized
 // chunk at a time with the next chunk fetched while the current one plays. Falls back to the
@@ -289,7 +290,7 @@ class SpeechEngine {
         resolve();
       };
       this.finish = done;
-      Speech.speak(text, {
+      Speech.speak(speakableUnits(text, lang), {
         language: lang,
         rate: this.rate,
         onDone: done,
