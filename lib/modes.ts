@@ -124,9 +124,13 @@ export type FrameCheckRequest = {
 };
 
 export type FrameCheckResponse = {
-  ready: boolean; // a readable target is fully in frame and sharp enough
+  ready: boolean; // the target's main text can be read now (edges cut, angle or glare are fine)
+  detected: boolean; // a readable target (product, package, menu, sign, label, document) is in view at all
   key?: string; // short stable identity of the target, e.g. "harbor-table-menu"
-  hint?: string; // one short spoken framing tip when not ready; empty when nothing relevant is in view
+  label?: string; // short spoken name, e.g. "Nutter Butter cookies", "Lunch menu"
+  suggestedMode?: Mode; // best mode for the target
+  confidence?: number; // 0 to 1, how sure the model is about `ready`
+  hint?: string; // one short spoken framing tip when detected but not ready; otherwise empty
 };
 
 export type Voice = { id: string; name: string; description?: string; previewUrl?: string };
