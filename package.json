@@ -9,7 +9,10 @@
     "lint": "eslint",
     "test": "vitest run",
     "db:setup": "node --env-file=.env.local scripts/db-setup.mjs",
-    "device:code": "node --env-file=.env.local scripts/device-code.mjs"
+    "device:code": "node --env-file=.env.local scripts/device-code.mjs",
+    "demo:info": "node --env-file=.env.local scripts/demo-info.mjs",
+    "sim": "node --env-file=.env.local hardware/sim-board.mjs",
+    "flash": "./hardware/flash.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",

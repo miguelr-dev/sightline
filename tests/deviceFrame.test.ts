@@ -28,7 +28,10 @@ vi.mock("@/lib/analyze", () => ({ analyzePhoto: vi.fn() }));
 vi.mock("@/lib/lookup", () => ({ webLookup: vi.fn() }));
 
 import { POST } from "@/app/api/device/frame/route";
-import { getFrame, resetFrameStore } from "@/lib/frameStore";
+import * as db from "@/lib/db";
+import { checkFrame } from "@/lib/frameCheck";
+import { analyzePhoto } from "@/lib/analyze";
+import { getFrame, noteCommand, resetFrameStore } from "@/lib/frameStore";
 
 const KEY = "test-shared-key-for-unit-tests";
 const JPEG = new Uint8Array(2_000).fill(7);
@@ -47,6 +50,7 @@ describe("POST /api/device/frame feeds the latest-frame store", () => {
     process.env.DEVICE_SHARED_KEY = KEY;
     resetFrameStore();
     bg.pending.length = 0;
+    vi.clearAllMocks();
   });
 
   it("keeps the hat's latest frame and its frame check in memory", async () => {
@@ -61,5 +65,55 @@ describe("POST /api/device/frame feeds the latest-frame store", () => {
     const res = await POST(frame("wrong-key"));
     expect(res.status).toBe(401);
     expect(getFrame("hat-01")).toBeUndefined();
+  });
+});
+
+describe("POST /api/device/frame auto-read vs voice commands", () => {
+  beforeEach(() => {
+    process.env.DEVICE_SHARED_KEY = KEY;
+    resetFrameStore();
+    bg.pending.length = 0;
+    vi.clearAllMocks();
+    // A ready target on its second frame in a row, so the hat reads it on its own.
+    vi.mocked(checkFrame).mockResolvedValue({
+      result: { ready: true, detected: true, key: "red-bull-package", label: "Red Bull", confidence: 0.95, hint: "" },
+      ok: true,
+    });
+    vi.mocked(db.updateHatState).mockResolvedValue({ streak: 2, prevSeenKey: "bull-red" });
+    vi.mocked(db.claimHatRead).mockResolvedValue(true);
+    vi.mocked(analyzePhoto).mockResolvedValue({
+      body: { spokenText: "Red Bull Energy Drink, 8.4 fluid ounces.", details: "", itemKind: "none" },
+      status: 200,
+      saved: Promise.resolve(),
+    });
+  });
+
+  async function answers() {
+    while (bg.pending.length) await Promise.all(bg.pending.splice(0));
+    return vi.mocked(db.addDeviceEvent).mock.calls.filter(([, kind]) => kind === "answer");
+  }
+
+  it("auto-reads a target seen twice in a row", async () => {
+    await POST(frame(KEY));
+    expect(await answers()).toHaveLength(1);
+  });
+
+  it("drops an automatic answer when a voice command arrives while it's being read", async () => {
+    vi.mocked(analyzePhoto).mockImplementation(async () => {
+      noteCommand("hat-01"); // the user spoke while the hat was already reading
+      return {
+        body: { spokenText: "Red Bull Energy Drink, 8.4 fluid ounces.", details: "", itemKind: "none" },
+        status: 200,
+        saved: Promise.resolve(),
+      };
+    });
+    await POST(frame(KEY));
+    expect(await answers()).toHaveLength(0);
+  });
+
+  it("doesn't post a second, automatic answer while a voice command is being answered", async () => {
+    noteCommand("hat-01");
+    await POST(frame(KEY));
+    expect(await answers()).toHaveLength(0);
   });
 });

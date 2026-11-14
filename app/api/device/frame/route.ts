@@ -5,7 +5,7 @@ import { analyzePhoto } from "@/lib/analyze";
 import { webLookup } from "@/lib/lookup";
 import { checkDeviceKey, matchKey, sameTarget, sharedKey, validHatId } from "@/lib/hat";
 import { readBody } from "@/lib/http";
-import { annotateFrame, putFrame } from "@/lib/frameStore";
+import { annotateFrame, commandActive, putFrame } from "@/lib/frameStore";
 import {
   addDeviceEvent,
   claimHatHint,
@@ -90,6 +90,8 @@ export async function POST(request: Request) {
 
 /** Read the frame like the phone app would, then look it up on the web, posting both as events. */
 async function readAndLookUp(hat: string, image: string, fc: FrameCheckResponse, button: boolean) {
+  // A voice command for this hat is being answered: don't speak a second, automatic answer.
+  if (!button && commandActive(hat)) return;
   // Hat scans go into the paired phone's history, so "Ask your history" covers them too.
   const owner = (await pairedPhone(hat)) ?? `hat-${hat}`;
   const mode: Mode = fc.suggestedMode ?? (fc.detected ? "read" : "describe");
@@ -102,6 +104,11 @@ async function readAndLookUp(hat: string, image: string, fc: FrameCheckResponse,
     device: owner,
     persist: "defer", // post the answer while the scan row is written; the lookup waits for both
   });
+  // The user asked for something by voice while this was being read: their command answers.
+  if (!button && commandActive(hat)) {
+    await saved;
+    return;
+  }
   await Promise.all([
     saved,
     addDeviceEvent(hat, "answer", {

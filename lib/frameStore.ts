@@ -25,10 +25,31 @@ export type StoredFrame = {
 type Store = {
   frames: Map<string, StoredFrame>;
   waiters: Map<string, Set<(frame: StoredFrame) => void>>;
+  commands: Map<string, number>; // when each hat last got a voice command
 };
 const g = globalThis as typeof globalThis & { __sightlineFrameStore?: Store };
-g.__sightlineFrameStore ??= { frames: new Map(), waiters: new Map() };
-const { frames, waiters } = g.__sightlineFrameStore;
+g.__sightlineFrameStore ??= { frames: new Map(), waiters: new Map(), commands: new Map() };
+g.__sightlineFrameStore.commands ??= new Map(); // a store created before this field existed
+const { frames, waiters, commands } = g.__sightlineFrameStore;
+
+/** While a voice command is being answered, the hat's auto-read stays quiet for this long. */
+export const COMMAND_QUIET_MS = 10_000;
+
+/** A voice command was just accepted for this hat. */
+export function noteCommand(device: string) {
+  commands.set(device, Date.now());
+}
+
+/** True if this hat got a voice command in the last COMMAND_QUIET_MS. */
+export function commandActive(device: string): boolean {
+  const at = commands.get(device);
+  if (at === undefined) return false;
+  if (Date.now() - at > COMMAND_QUIET_MS) {
+    commands.delete(device);
+    return false;
+  }
+  return true;
+}
 
 function sweep(now: number) {
   for (const [device, frame] of frames) {
@@ -97,4 +118,5 @@ export function waitForFrame(
 export function resetFrameStore() {
   frames.clear();
   waiters.clear();
+  commands.clear();
 }

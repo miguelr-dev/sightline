@@ -9,9 +9,10 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
+import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, Alert, AppState, Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { AccessibilityInfo, Alert, AppState, Linking, PanResponder, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   analyze,
@@ -25,11 +26,13 @@ import {
   lookup,
   parseDeviceAnswer,
   sendHatCommand,
+  lookupBarcode,
+  unpairHat,
   setBaseUrl,
   setDeviceId,
   transcribe,
 } from "./src/api";
-import { ModeGrid } from "./src/components/ModeGrid";
+import { CamButton, Frost, LastThumb, ModeStrip, Shutter } from "./src/components/CameraChrome";
 import { RecentSheet, type AskState } from "./src/components/RecentSheet";
 import { ResultSheet } from "./src/components/ResultSheet";
 import { LanguageSheet, SettingsSheet, type Connection } from "./src/components/SettingsSheet";
@@ -42,6 +45,8 @@ import {
   MODES,
   UNKNOWN_FEATURES,
   type DeviceEvent,
+  type AnalyzeResponse,
+  type BarcodeResult,
   type Mode,
   type Scan,
   type Voice,
@@ -54,6 +59,25 @@ import { DetectionCard } from "./src/components/DetectionCard";
 import { HatView } from "./src/components/HatView";
 import { useAutoCapture, type AutoDebug, type Detection } from "./src/useAutoCapture";
 import { useHatCamera } from "./src/useHatCamera";
+import { averageLuma, isTooDark } from "./src/logic/brightness";
+import { lookupLanguage } from "./src/logic/lookupRequest";
+import { conversationFrom, trimConversation, type Turn } from "./src/logic/conversation";
+import { initialBook, reduceBook, sentenceOwner, type BookEvent, type BookPage, type BookState } from "./src/logic/book";
+import { BookView } from "./src/components/BookView";
+import { useTurnDetector } from "./src/useTurnDetector";
+import { analyzeModeFor, autoRetry, barcodeAction, concreteMode, detectAllowedIn, frameCheckMode, headerLabel, STRIP_LABELS, STRIP_MODES, type StripMode } from "./src/logic/modeStrip";
+import { webSpeechPolicy, type WebTrigger } from "./src/logic/webSpeech";
+import { initialBarcodeState, normalizeBarcode, reduceBarcode, type BarcodeEvent } from "./src/logic/barcode";
+import {
+  buildLookingRequest,
+  fallbackFor,
+  initialCaption,
+  initialSilence,
+  reduceCaption,
+  trackSilence,
+  type CaptionEvent,
+  type CaptionState,
+} from "./src/logic/askWhileLooking";
 import {
   HISTORY_QUESTION,
   initialCommandState,
@@ -69,10 +93,10 @@ const MAX_SIDE = 1024;
 const JPEG_QUALITY = 0.6;
 const FRAME_SIDE = 512;
 const MAX_RECORD_MS = 12_000;
-const QUIET_BEFORE_AUTO_MS = 600; // speech must have been stopped this long before an auto read
+const CAMERA_SETTLE_MS = 1200; // let auto-exposure settle after the camera (re)starts
 const demo = demoState(); // web screenshots only; null on iOS
 
-// One resize + one JPEG encode. The camera already delivers a reduced-size frame (see pictureSize).
+// One resize + one JPEG encode.
 async function toJpeg(uri: string, width: number, height: number, maxSide = MAX_SIDE, compress = JPEG_QUALITY): Promise<Photo> {
   const ctx = ImageManipulator.manipulate(uri);
   if (Math.max(width, height) > maxSide) ctx.resize(width >= height ? { width: maxSide } : { height: maxSide });
@@ -82,11 +106,30 @@ async function toJpeg(uri: string, width: number, height: number, maxSide = MAX_
   return { uri: out.uri, base64: out.base64, width: out.width, height: out.height };
 }
 
-// Smallest camera preset that still gives at least MAX_SIDE px on the short crop: capturing a
-// 12 MP photo only to shrink it costs encode time on every shot.
-function pickPictureSize(sizes: string[]): string | undefined {
-  for (const want of ["1920x1080", "High", "3840x2160"]) if (sizes.includes(want)) return want;
-  return undefined;
+// Auto-mode frame: 512 px JPEG for the server plus a 16 px PNG to measure brightness locally.
+async function toFrame(uri: string, width: number, height: number): Promise<{ image: string } | { dark: true; luma: number }> {
+  const ctx = ImageManipulator.manipulate(uri);
+  if (Math.max(width, height) > FRAME_SIDE) ctx.resize(width >= height ? { width: FRAME_SIDE } : { height: FRAME_SIDE });
+  const img = await ctx.renderAsync();
+  const out = await img.saveAsync({ format: SaveFormat.JPEG, compress: 0.5, base64: true });
+  if (!out.base64) throw new Error("no image data");
+  try {
+    const tiny = await ImageManipulator.manipulate(img).resize({ width: 16 }).renderAsync();
+    const png = await tiny.saveAsync({ format: SaveFormat.PNG, base64: true });
+    const luma = png.base64 ? averageLuma(png.base64) : NaN;
+    if (isTooDark(luma)) return { dark: true, luma };
+  } catch {
+    // Can't measure: send it anyway.
+  }
+  return { image: out.base64 };
+}
+
+// One camera operation at a time: auto frames and manual captures never overlap.
+let cameraQueue: Promise<unknown> = Promise.resolve();
+function withCamera<T>(fn: () => Promise<T>): Promise<T> {
+  const run = cameraQueue.then(fn, fn);
+  cameraQueue = run.catch(() => undefined);
+  return run;
 }
 
 const haptic = {
@@ -111,20 +154,25 @@ function Main() {
   const [askState, setAskState] = useState<AskState>(demo?.ask ?? { status: "idle" });
   const [askAvailable, setAskAvailable] = useState(true); // false after /api/ask 404s
   const askId = useRef(0);
-  const voiceTarget = useRef<"photo" | "history" | "main" | "hat">("photo");
+  const voiceTarget = useRef<"photo" | "history" | "main" | "hat" | "book">("photo");
   const [cmd, setCmd] = useState<CommandState>(initialCommandState);
   const cmdRef = useRef<CommandState>(initialCommandState);
   const cmdLocalId = useRef(0);
   const [shot, setShot] = useState<Shot | null>(demo?.shot ?? null);
   const [sheet, setSheetState] = useState<SheetName>(demo?.sheet ?? "none");
   const [busy, setBusy] = useState(false);
+  const [book, setBookState] = useState<BookState>(demo?.book ?? initialBook);
+  const bookRef = useRef<BookState>(book);
+  const bookPhotos = useRef<string[]>([]); // base64 of each page, for "Ask about this page"
+  const bookActive = book.status !== "idle";
+  const [speakingOwner, setSpeakingOwner] = useState<string | null>(null);
   const [speaking, setSpeaking] = useState(false);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [reduceMotion, setReduceMotion] = useState(false);
   const [screenReader, setScreenReader] = useState(false);
   const [appActive, setAppActive] = useState(AppState.currentState === "active");
-  const [pictureSize, setPictureSize] = useState<string | undefined>();
+  const cameraStartedAt = useRef(0);
   const [cameraReady, setCameraReady] = useState(false);
   const [hint, setHint] = useState<string | null>(demo?.hint ?? null);
   const [detection, setDetection] = useState<Detection | null>(demo?.detection ?? null);
@@ -133,8 +181,9 @@ function Main() {
   const detectionRef = useRef<Detection | null>(detection);
   const detectionHide = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [camPerm, requestCamPerm] = useCameraPermissions();
+  const camGranted = demo ? true : !!camPerm?.granted;
   const camera = useRef<CameraView>(null);
-  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true });
   const recordTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shotRef = useRef<Shot | null>(shot);
   const sheetRef = useRef<SheetName>(sheet);
@@ -143,6 +192,7 @@ function Main() {
   // Bumped whenever a result is dismissed or replaced. Async work (answers, follow-ups, web
   // lookups) captures it when it starts and stays silent if it changed in the meantime.
   const speakToken = useRef(0);
+  const autoSupported = useRef(true); // server accepts mode "auto"; false after a 400
   const quietSince = useRef(Date.now());
   const speakingRef = useRef(false);
   const live = useRef({ settings, screenReader, connection });
@@ -155,9 +205,11 @@ function Main() {
   // ---- setup -------------------------------------------------------------------------------
   useEffect(() => {
     void speech.init();
-    const unsub = speech.subscribe((v) => {
+    const unsub = speech.subscribe((v, owner) => {
       speakingRef.current = v;
       setSpeaking(v);
+      setSpeakingOwner(v ? owner : null);
+      if (bookRef.current.status !== "idle") dispatchBook({ type: "speaking", owner: v ? owner : null });
       if (!v) quietSince.current = Date.now();
     });
     void AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion);
@@ -254,7 +306,7 @@ function Main() {
 
   // ---- web lookup -------------------------------------------------------------------------------
   const runLookup = useCallback(
-    async (s: Shot, auto: boolean) => {
+    async (s: Shot, auto: boolean, trigger: WebTrigger = auto ? "automatic" : "lookupButton") => {
       const r = s.result;
       if (!r || r.error) return;
       const token = speakToken.current;
@@ -273,6 +325,7 @@ function Main() {
         query,
         itemKind: r.itemKind,
         scanId: r.scanId,
+        language: lookupLanguage(s.mode, s.language),
         context: { mode: s.mode, spokenText: r.spokenText, details: r.details },
       });
       clearTimeout(showLoading);
@@ -286,8 +339,14 @@ function Main() {
       }
       patchShot(s.id, (x) => ({ ...x, web: { status: "done", data } }));
       if (token !== speakToken.current) return; // sheet closed meanwhile: show it, never speak it
+      // The web card is silent unless the user asked for the lookup; it has its own Listen button.
+      if (webSpeechPolicy(trigger) === "silent") {
+        if (!data.error) void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        return;
+      }
       if (!data.error) haptic.success();
-      say(data.spokenText, "en-US", { queue: auto, token });
+      const webLang = lookupLanguage(s.mode, s.language) ? languageCode(s.language) : "en-US";
+      say(data.spokenText, webLang, { queue: auto, token });
     },
     [say],
   );
@@ -297,20 +356,36 @@ function Main() {
     async (s: Shot) => {
       if (!s.photo) return;
       const token = speakToken.current;
-      const r = await analyze({
-        image: s.photo.base64,
-        mode: s.mode,
-        ...(s.mode === "translate" ? { language: s.language } : {}),
-      });
+      const strip = s.strip ?? s.mode;
+      const ask = (mode: StripMode) =>
+        analyze({
+          image: s.photo!.base64,
+          mode,
+          ...(mode === "translate" ? { language: s.language } : {}),
+          ...(s.key ? { key: s.key } : {}),
+        });
+      let sent = analyzeModeFor(strip, { autoSupported: autoSupported.current, suggested: s.suggested });
+      let r = await ask(sent);
+      if (autoRetry({ sent, status: r.httpStatus ?? 0, error: !!r.error })) {
+        autoSupported.current = false; // older server: pick the mode on the phone from now on
+        sent = analyzeModeFor(strip, { autoSupported: false, suggested: s.suggested });
+        r = await ask(sent);
+      }
       if (shotRef.current?.id !== s.id) return;
-      const done: Shot = { ...s, result: r };
+      const mode = r.interpreted?.mode ?? (sent === "auto" ? s.mode : sent);
+      const done: Shot = {
+        ...s,
+        mode,
+        result: r,
+        ...(strip === "auto" ? { label: headerLabel("auto", r.interpreted ?? (sent !== "auto" ? { mode: sent } : undefined)) } : {}),
+      };
       setShot(done);
       shotRef.current = done;
       setBusyBoth(false);
       if (token !== speakToken.current) return; // dismissed while looking: keep the result, stay quiet
       if (r.error) haptic.error();
       else haptic.success();
-      say(r.spokenText, speakLang(s), { token });
+      say(r.spokenText, speakLang(done), { token });
       // Look the identified product, medicine or place up on the web once the answer is out.
       if (!r.error && r.webQuery && r.itemKind && r.itemKind !== "none") void runLookup(done, true);
     },
@@ -318,7 +393,10 @@ function Main() {
   );
 
   const start = useCallback(
-    async (getPhoto: () => Promise<Photo | null>, opts: { auto?: boolean; mode?: Mode } = {}) => {
+    async (
+      getPhoto: () => Promise<Photo | null>,
+      opts: { auto?: boolean; mode?: Mode; key?: string; suggested?: Mode | null } = {},
+    ) => {
       if (busyRef.current) return;
       setBusyBoth(true);
       silence(); // a new read always cuts off the previous one
@@ -327,9 +405,20 @@ function Main() {
       else haptic.capture();
       const id = nextId.current++;
       const { settings: s } = live.current;
-      const mode = opts.mode ?? s.mode;
-      if (opts.mode && opts.mode !== s.mode) setSettings((x) => ({ ...x, mode }));
-      const fresh: Shot = { id, photo: null, mode, language: s.language, followUps: [], web: { status: "idle" } };
+      const strip: StripMode = opts.mode ?? s.mode;
+      if (opts.mode && opts.mode !== s.mode) setSettings((x) => ({ ...x, mode: opts.mode! }));
+      const fresh: Shot = {
+        id,
+        photo: null,
+        mode: concreteMode(strip, opts.suggested),
+        strip,
+        suggested: opts.suggested ?? null,
+        language: s.language,
+        followUps: [],
+        web: { status: "idle" },
+        key: opts.key,
+        createdAt: Date.now(),
+      };
       try {
         const photo = await getPhoto();
         if (!photo) {
@@ -355,6 +444,8 @@ function Main() {
   const autoEnabled =
     !demo &&
     !hat &&
+    !bookActive &&
+    detectAllowedIn(settings.mode) &&
     Platform.OS !== "web" &&
     settings.autoCapture &&
     appActive &&
@@ -367,23 +458,23 @@ function Main() {
 
   const auto = useAutoCapture({
     enabled: autoEnabled,
-    takeFrame: async () => {
-      const pic = await camera.current?.takePictureAsync({ quality: 0.4, shutterSound: false });
-      if (!pic) return null;
-      const small = await toJpeg(pic.uri, pic.width, pic.height, FRAME_SIDE, 0.5);
-      return small.base64;
-    },
-    check: (image) => {
+    // Same capture settings as Capture (which gives good photos), minus the shutter sound, then
+    // shrunk to 512 px. Never while the camera is (re)starting, never overlapping another capture.
+    takeFrame: () =>
+      withCamera(async () => {
+        if (!cameraStartedAt.current || Date.now() - cameraStartedAt.current < CAMERA_SETTLE_MS) return null;
+        if (busyRef.current || sheetRef.current !== "none") return null;
+        if (barcodeCardRef.current || barcodeState.current.pending) return null; // a barcode has priority
+        const pic = await camera.current?.takePictureAsync({ quality: 0.7, shutterSound: false });
+        if (!pic) return null;
+        return toFrame(pic.uri, pic.width, pic.height);
+      }),
+    check: (image, last) => {
       const { settings: s } = live.current;
-      return frameCheck({ image, mode: s.mode, ...(s.mode === "translate" ? { language: s.language } : {}) });
+      return frameCheck({ image, mode: frameCheckMode(s.mode), ...(s.mode === "translate" ? { language: s.language } : {}), ...last });
     },
-    onReady: (mode) => {
-      // Never start over speech that's still winding down from a previous result.
-      if (busyRef.current || sheetRef.current !== "none" || Date.now() - quietSince.current < QUIET_BEFORE_AUTO_MS) return;
-      showDetection(null, true);
-      void start(capturePhoto(false), { auto: true, mode: mode ?? undefined });
-    },
-    onDetect: (d) => showDetection(d),
+    // Auto never reads by itself: it only offers the card. Reading starts when the user taps it.
+    onDetect: (d, appeared) => showDetection(d, false, 2000, appeared),
     onDebug: showDebug ? setDebug : undefined,
     onHint: (text) => {
       if (busyRef.current || sheetRef.current !== "none") return; // never over a result
@@ -402,7 +493,7 @@ function Main() {
 
   // Suggestion card. Appears (with a light haptic and a VoiceOver announcement, never TTS) when
   // frame-check detects something; stays while it's detected; fades about 2 s after it's gone.
-  function showDetection(d: Detection | null, now = false, hideAfterMs = 2000) {
+  function showDetection(d: Detection | null, now = false, hideAfterMs = 2000, appeared?: boolean) {
     if (!d) {
       if (now) {
         if (detectionHide.current) clearTimeout(detectionHide.current);
@@ -423,10 +514,10 @@ function Main() {
     const prev = detectionRef.current;
     detectionRef.current = d;
     setDetection(d);
-    if (prev && prev.key === d.key && prev.label === d.label) return;
+    if (appeared === false || (appeared === undefined && prev && prev.key === d.key)) return;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     // Point the mode chips at the suggestion so a manual Capture uses it too.
-    if (d.mode && d.mode !== live.current.settings.mode && !live.current.settings.hatConnected) {
+    if (d.mode && live.current.settings.mode !== "auto" && d.mode !== live.current.settings.mode && !live.current.settings.hatConnected) {
       setSettings((x) => ({ ...x, mode: d.mode! }));
     }
     if (live.current.screenReader) AccessibilityInfo.announceForAccessibility(`${d.label} detected. Double-tap the card to read.`);
@@ -435,10 +526,109 @@ function Main() {
   const readDetection = () => {
     const d = detectionRef.current;
     if (!d) return;
-    auto.markRead(d.key);
     showDetection(null, true);
-    void start(capturePhoto(true), { mode: d.mode ?? undefined });
+    const strip = live.current.settings.mode;
+    void start(capturePhoto(true), strip === "auto" ? { suggested: d.mode, key: d.key } : { mode: d.mode ?? undefined, key: d.key });
   };
+
+  // ---- barcodes ------------------------------------------------------------------------------------
+  // On-device scanning in every mode but Translate. A code seen twice within 500 ms is looked up
+  // and offered as a card; nothing is spoken until the user taps it. Logic: logic/barcode.ts.
+  const barcodeOn =
+    !hat && !demo && !bookActive && connection.features.barcode === true && barcodeAction(settings.mode) !== "off" && sheet === "none";
+  const barcodeState = useRef(initialBarcodeState);
+  const [barcodeCard, setBarcodeCardState] = useState<BarcodeResult | null>(demo?.barcode ?? null);
+  const barcodeCardRef = useRef<BarcodeResult | null>(barcodeCard);
+  const setBarcodeCard = (b: BarcodeResult | null) => {
+    barcodeCardRef.current = b;
+    setBarcodeCardState(b);
+  };
+
+  function dispatchBarcode(e: BarcodeEvent) {
+    const r = reduceBarcode(barcodeState.current, e);
+    barcodeState.current = r.state;
+    for (const fx of r.effects) {
+      if (fx.type === "aimTick") haptic.tick();
+      else if (fx.type === "gone") setBarcodeCard(null);
+      else void confirmBarcode(fx.code);
+    }
+  }
+
+  async function confirmBarcode(code: string) {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    const res = await lookupBarcode(code);
+    if (!res || barcodeState.current.confirmed !== code) return; // failed, or it left the frame
+    setBarcodeCard(res);
+    // BARCODE mode: the user chose it, so open and speak right away (like book mode).
+    if (barcodeAction(live.current.settings.mode) === "openAndSpeak") return readBarcode();
+    showDetection(null, true); // the barcode card takes priority
+    if (live.current.screenReader) {
+      AccessibilityInfo.announceForAccessibility(`${res.title ?? "Product"} barcode. Double-tap the card to read.`);
+    }
+  }
+
+  const onBarcode = (r: { type: string; data: string }) => {
+    const code = normalizeBarcode(r.type, r.data);
+    dispatchBarcode(code ? { type: "seen", code, at: Date.now() } : { type: "partial", at: Date.now() });
+  };
+
+  useEffect(() => {
+    if (!barcodeOn) return;
+    const t = setInterval(() => dispatchBarcode({ type: "tick", at: Date.now() }), 500);
+    return () => clearInterval(t);
+  }, [barcodeOn]);
+
+  const readBarcode = () => {
+    const b = barcodeCardRef.current;
+    if (!b) return;
+    dispatchBarcode({ type: "read", code: b.code, at: Date.now() });
+    setBarcodeCard(null);
+    silence();
+    const token = speakToken.current;
+    const next: Shot = {
+      id: nextId.current++,
+      photo: b.image ? { uri: b.image, base64: "", width: 1, height: 1 } : null,
+      mode: "menu",
+      language: live.current.settings.language,
+      result: { spokenText: b.spokenText, details: "", sections: b.sections, itemKind: b.itemKind, scanId: b.scanId, error: !b.found },
+      followUps: [],
+      web: { status: "idle" },
+      fromHistory: true, // no photo data: no follow-ups or retry
+      label: "Barcode",
+    };
+    setShot(next);
+    shotRef.current = next;
+    setSheet("result");
+    haptic.success();
+    say(b.spokenText, "en-US", { token });
+  };
+
+  const dismissBarcode = () => {
+    const b = barcodeCardRef.current;
+    if (!b) return;
+    haptic.tick();
+    dispatchBarcode({ type: "read", code: b.code, at: Date.now() }); // hide it for a while
+    setBarcodeCard(null);
+  };
+
+  const dismissDetection = () => {
+    const d = detectionRef.current;
+    if (!d) return;
+    haptic.tick();
+    auto.dismiss(d.key);
+    showDetection(null, true);
+  };
+
+  // Whenever a sheet closes, Auto resumes at once and may offer the same item again (rescan).
+  useEffect(() => {
+    if (sheet === "none") {
+      auto.resume();
+      // In BARCODE mode the product is usually still in view: wait a moment before reopening it.
+      dispatchBarcode(
+        live.current.settings.mode === "barcode" ? { type: "sheetClosed", at: Date.now(), holdMs: 3000 } : { type: "sheetClosed" },
+      );
+    }
+  }, [sheet]);
 
   // ---- hat camera ---------------------------------------------------------------------------------
   // The phone is the speaker for a camera on a cap: it polls the server for what the hat saw.
@@ -540,15 +730,21 @@ function Main() {
       if (scanId && cur.result?.scanId && cur.result.scanId !== scanId) return;
       patchShot(cur.id, (x) => ({ ...x, web: { status: "done", data: web } }));
       const tok = hatShotToken.current;
-      if (tok && tok.shotId === cur.id && tok.token === speakToken.current && !web.error) {
+      const policy = webSpeechPolicy(cur.webExplicit ? "hatLookupCommand" : "hatUpdate");
+      if (tok && tok.shotId === cur.id && tok.token === speakToken.current && !web.error && policy === "speak") {
         say(web.spokenText, "en-US", { queue: true, token: tok.token });
+      } else if (!web.error) {
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
       }
       return;
     }
     if (!answer) return;
     silence(); // a new answer replaces whatever was being said
     const token = speakToken.current;
-    const mode = MODES.includes(p.mode as Mode) ? (p.mode as Mode) : live.current.settings.mode;
+    const st0 = live.current.settings.mode;
+    const mode = MODES.includes(p.mode as Mode) ? (p.mode as Mode) : concreteMode(st0);
+    const cmdType = (p.command as { type?: unknown } | undefined)?.type;
+    const webExplicit = cmdType === "lookup"; // "search for this": the user asked, so speak it
     const next: Shot = {
       id: nextId.current++,
       photo: image ? { uri: image, base64: "", width: 4, height: 3 } : null,
@@ -558,6 +754,7 @@ function Main() {
       followUps: [],
       web: web ? { status: "done", data: web } : { status: "idle" },
       fromHistory: true, // no photo data on the phone: no follow-ups or retry
+      webExplicit,
     };
     setShot(next);
     shotRef.current = next;
@@ -569,7 +766,9 @@ function Main() {
     if (answer.error) haptic.error();
     else haptic.success();
     say(answer.spokenText, mode === "translate" ? languageCode(next.language) : "en-US", { token });
-    if (web && !web.error) say(web.spokenText, "en-US", { queue: true, token });
+    if (web && !web.error && webSpeechPolicy(webExplicit ? "hatLookupCommand" : "hatUpdate") === "speak") {
+      say(web.spokenText, "en-US", { queue: true, token });
+    }
   };
 
   const hatCam = useHatCamera({
@@ -584,12 +783,14 @@ function Main() {
     silence();
     showDetection(null, true);
     setHint(null);
+    const { settings: st } = live.current;
+    void unpairHat(st.hatDeviceId.trim(), st.hatPairCode.trim()); // so another phone can pair at once
     update({ hatConnected: false });
     if (live.current.screenReader) AccessibilityInfo.announceForAccessibility("Hat camera disconnected");
   };
 
   const pausedReasons = [
-    !settings.autoCapture && "Auto off",
+    !settings.autoCapture && "Detect off",
     !appActive && "app inactive",
     !cameraReady && "camera not ready",
     !camPerm?.granted && "no camera permission",
@@ -603,8 +804,7 @@ function Main() {
   // the haptic tick instead.
   function capturePhoto(shutter: boolean) {
     return async () => {
-      await auto.idle(); // wait for any auto frame grab still using the camera
-      const pic = await camera.current?.takePictureAsync({ quality: 0.7, shutterSound: shutter });
+      const pic = await withCamera(() => camera.current!.takePictureAsync({ quality: 0.7, shutterSound: shutter }));
       if (!pic) throw new Error("camera not ready");
       return toJpeg(pic.uri, pic.width, pic.height);
     };
@@ -612,16 +812,17 @@ function Main() {
 
   const capture = () => start(capturePhoto(true));
 
-  const onCameraReady = async () => {
+  // The preview stops while a sheet is open; give exposure time to settle after it restarts.
+  const cameraLive = sheet === "none" && appActive && !hat;
+  useEffect(() => {
+    cameraStartedAt.current = cameraLive && cameraReady ? Date.now() : 0;
+  }, [cameraLive, cameraReady]);
+
+  // The default "photo" preset on purpose: a video preset (1920x1080) captured faster but is
+  // the prime suspect for the dark auto frames, and manual Capture photos were fine without it.
+  const onCameraReady = () => {
     setCameraReady(true);
-    if (pictureSize) return;
-    try {
-      const sizes = (await camera.current?.getAvailablePictureSizesAsync()) ?? [];
-      const pick = pickPictureSize(sizes);
-      if (pick) setPictureSize(pick);
-    } catch {
-      // Keep the default preset.
-    }
+    cameraStartedAt.current = Date.now();
   };
 
   const pickPhoto = () =>
@@ -645,6 +846,13 @@ function Main() {
   };
 
   // ---- follow-up questions ----------------------------------------------------------------------
+  /** Up to 6 earlier question/answer turns about this result (carried-over thread first). */
+  const threadOf = (s: Shot): Turn[] =>
+    trimConversation([
+      ...(s.thread ?? []),
+      ...(s.asked && s.result && !s.result.error ? [{ question: s.asked, answer: s.result.spokenText }] : []),
+      ...conversationFrom(s.followUps),
+    ]);
   const ask = async (question: string) => {
     const s = shotRef.current;
     if (!s?.photo || !s.result || s.result.error) return;
@@ -658,6 +866,7 @@ function Main() {
       mode: s.mode,
       question,
       ...(s.mode === "translate" ? { language: s.language } : {}),
+      conversation: threadOf(s), // earlier turns about this result, so follow-ups make sense
     });
     if (shotRef.current?.id !== s.id) return;
     patchShot(s.id, (x) => ({
@@ -696,6 +905,7 @@ function Main() {
     if (token !== speakToken.current) return; // sheet closed while transcribing
     const target = voiceTarget.current;
     if (target === "hat") return void submitHatInput(text, "voice");
+    if (target === "book") return void askBook(text);
     if (target === "photo") return void ask(text);
     if (target === "history") return void runAsk(text);
     // Main screen: questions about earlier scans (or any question before there's a photo) go to
@@ -713,7 +923,7 @@ function Main() {
     void ask(text);
   };
 
-  const toggleMic = async (target: "photo" | "history" | "main" | "hat" = "photo") => {
+  const toggleMic = async (target: "photo" | "history" | "main" | "hat" | "book" = "photo") => {
     if (recording) return stopRecording();
     voiceTarget.current = target;
     if (target === "hat") silence(); // also keeps a late web summary from talking over the recording
@@ -834,27 +1044,310 @@ function Main() {
     ]);
   };
 
+  // ---- book mode -------------------------------------------------------------------------------------
+  // The user starts a reading session; pages are read sentence by sentence and the next page is
+  // read when they turn it. Logic: logic/book.ts.
+  function dispatchBook(e: BookEvent) {
+    const r = reduceBook(bookRef.current, e);
+    bookRef.current = r.state;
+    setBookState(r.state);
+    for (const fx of r.effects) {
+      if (fx.type === "stopSpeech") silence();
+      else if (fx.type === "capture") void captureBookPage();
+      else if (fx.type === "haptic") void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      else if (fx.type === "speak") speech.speak(fx.text, "en-US", { owner: "book-prompt" });
+      else {
+        const page = r.state.pages[fx.pageIndex];
+        if (page) {
+          speech.speakAll(
+            page.sentences.slice(fx.sentence).map((t, k) => ({ owner: sentenceOwner(fx.pageIndex, fx.sentence + k), text: t })),
+            "en-US",
+          );
+        }
+      }
+    }
+  }
+
+  // Older servers without book mode: make a page from the plain read answer.
+  const pageFromAnswer = (r: AnalyzeResponse): BookPage | null => {
+    if (r.error) return null;
+    const text = (r.details || r.spokenText).trim();
+    let h = 0;
+    for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) | 0;
+    const sentences = (text.match(/[^.!?\n]+[.!?]*/g) ?? []).map((x) => x.trim()).filter(Boolean);
+    return sentences.length ? { text, sentences, signature: `h${h}`, complete: true } : null;
+  };
+
+  async function captureBookPage() {
+    try {
+      const photo = await withCamera(async () => {
+        const pic = await camera.current?.takePictureAsync({ quality: 0.8, shutterSound: false });
+        return pic ? toJpeg(pic.uri, pic.width, pic.height, 1600, 0.75) : null; // more pixels for small print
+      });
+      if (!photo || bookRef.current.status !== "capturing") return;
+      const r = await analyze({ image: photo.base64, mode: "read", book: true });
+      if (bookRef.current.status !== "capturing") return; // ended meanwhile
+      const page = r.page ?? pageFromAnswer(r);
+      if (!page) {
+        dispatchBook({ type: "page", page: { text: "", sentences: [], signature: "x", complete: false, cutOff: r.error ? r.spokenText : "I couldn't read that page. Please try again." } });
+        return;
+      }
+      const before = bookRef.current.pages.length;
+      dispatchBook({ type: "page", page });
+      if (bookRef.current.pages.length > before) bookPhotos.current[bookRef.current.pageIndex] = photo.base64;
+    } catch {
+      dispatchBook({ type: "page", page: { text: "", sentences: [], signature: "x", complete: false, cutOff: "I couldn't take that picture. Please try again." } });
+    }
+  }
+
+  async function askBook(text: string) {
+    if (/\bnext page\b/i.test(text)) return dispatchBook({ type: "nextPage" });
+    const b = bookRef.current;
+    const image = bookPhotos.current[b.pageIndex];
+    if (!image) return dispatchBook({ type: "answered" });
+    const r = await analyze({ image, mode: "read", question: text });
+    if (bookRef.current.status !== "asking") return;
+    dispatchBook({ type: "answered" }); // paused: "Resume" continues from the same sentence
+    speech.speak(r.spokenText, "en-US", { owner: "book-answer" });
+  }
+
+  const startBook = () => {
+    haptic.capture();
+    bookPhotos.current = [];
+    dispatchBook({ type: "start" });
+  };
+
+  useTurnDetector(book.status === "waitingTurn" && !demo, () => dispatchBook({ type: "turnDetected" }));
+  useEffect(() => {
+    if (!appActive && bookRef.current.status !== "idle") dispatchBook({ type: "pause" });
+  }, [appActive]);
+
+  // ---- ask while looking ---------------------------------------------------------------------------
+  // Hold the mic (or tap it) on the camera screen and ask about what's in front of you: on release
+  // a fresh frame is captured and the question is answered about it. Logic: logic/askWhileLooking.
+  const [caption, setCaption] = useState<CaptionState>(demo?.caption ?? initialCaption);
+  const captionRef = useRef<CaptionState>(caption);
+  const [level, setLevel] = useState(0); // 0..1 mic level for the caption
+  const [frozen, setFrozen] = useState<string | null>(demo?.frozen ?? null);
+  const supportsUtterance = useRef(true);
+  const looking = useRef({ recording: false, pressedAt: 0, ignoreRelease: false, poll: null as ReturnType<typeof setInterval> | null });
+  const captionFade = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function dispatchCaption(e: CaptionEvent) {
+    const r = reduceCaption(captionRef.current, e);
+    captionRef.current = r.state;
+    setCaption(r.state);
+    for (const fx of r.effects) {
+      if (fx.type === "stopSpeech") silence();
+      else if (live.current.screenReader && !(fx.text === "Answer ready." && live.current.settings.autoSpeak)) {
+        AccessibilityInfo.announceForAccessibility(fx.text);
+      }
+    }
+    if (r.state.phase === "answered" || r.state.phase === "error") {
+      if (captionFade.current) clearTimeout(captionFade.current);
+      captionFade.current = setTimeout(() => {
+        dispatchCaption({ type: "faded" });
+        setFrozen(null);
+      }, r.state.phase === "answered" ? 1500 : 3000);
+    }
+  }
+
+  const lookingAvailable = !hat && camGranted && !demo;
+
+  async function startLooking() {
+    if (busyRef.current || looking.current.recording) return;
+    const perm = await requestRecordingPermissionsAsync();
+    if (!perm.granted) {
+      haptic.error();
+      return say("Microphone access is off. You can turn it on in Settings.");
+    }
+    if (captionFade.current) clearTimeout(captionFade.current);
+    setFrozen(null);
+    dispatchCaption({ type: "press" }); // stops speech first
+    try {
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true, shouldRouteThroughEarpiece: false });
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+    } catch {
+      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+      haptic.error();
+      return dispatchCaption({ type: "failed", message: "I couldn't start the microphone." });
+    }
+    looking.current.recording = true;
+    looking.current.pressedAt = Date.now();
+    haptic.tick();
+    let quiet = initialSilence;
+    const started = Date.now();
+    looking.current.poll = setInterval(() => {
+      let db: number | undefined;
+      try {
+        db = recorder.getStatus().metering;
+      } catch {
+        db = undefined;
+      }
+      if (typeof db === "number") setLevel(Math.max(0, Math.min(1, (db + 60) / 50)));
+      const t = trackSilence(quiet, db, Date.now());
+      quiet = t.state;
+      if (t.stop || Date.now() - started > MAX_RECORD_MS) void finishLooking();
+    }, 100);
+  }
+
+  async function finishLooking() {
+    if (!looking.current.recording) return;
+    looking.current.recording = false;
+    if (looking.current.poll) clearInterval(looking.current.poll);
+    looking.current.poll = null;
+    setLevel(0);
+    dispatchCaption({ type: "release" });
+    setBusyBoth(true);
+    // Fresh full-quality frame (no shutter flash or sound) while the speech is transcribed.
+    const framePromise = withCamera(async () => {
+      const pic = await camera.current?.takePictureAsync({ quality: 0.7, shutterSound: false });
+      return pic ? toJpeg(pic.uri, pic.width, pic.height) : null;
+    }).catch(() => null);
+    const textPromise = (async () => {
+      try {
+        await recorder.stop();
+      } catch {}
+      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+      const uri = recorder.uri;
+      return uri ? transcribe(uri) : { text: "", status: 0 };
+    })();
+    const [photo, heard] = await Promise.all([framePromise, textPromise]);
+    if (photo) setFrozen(photo.uri);
+    dispatchCaption({ type: "transcribed", text: heard.text });
+    const route = routeInput(heard.text, { askAvailable: askOn, source: "voice" });
+    if (route.kind === "empty") {
+      setBusyBoth(false);
+      haptic.error();
+      if (heard.status === 404 || heard.status === 503) {
+        setConnection((c) => ({ ...c, features: { ...c.features, transcribe: false } }));
+      }
+      return;
+    }
+    if (route.kind === "ask") {
+      setBusyBoth(false);
+      dispatchCaption({ type: "interpreted" });
+      void openRecent();
+      void runAsk(route.question);
+      return dispatchCaption({ type: "answered" });
+    }
+    if (!photo) {
+      setBusyBoth(false);
+      haptic.error();
+      return dispatchCaption({ type: "failed", message: "I couldn't take a picture. Try again." });
+    }
+    await answerLooking(photo, route.text);
+  }
+
+  async function answerLooking(photo: Photo, text: string) {
+    const { settings: st } = live.current;
+    const token = speakToken.current;
+    // Asking again within 2 minutes continues the same conversation.
+    const prev = shotRef.current;
+    const thread =
+      prev && prev.createdAt && Date.now() - prev.createdAt < 120_000 && (prev.asked || prev.followUps.length) ? threadOf(prev) : [];
+    const ask = (supports: boolean) =>
+      analyze({
+        ...buildLookingRequest({
+          image: photo.base64,
+          mode: analyzeModeFor(st.mode, { autoSupported: autoSupported.current }),
+          language: st.language,
+          utterance: text,
+          supportsUtterance: supports,
+        }),
+        ...(thread.length ? { conversation: thread } : {}),
+      });
+    let r = await ask(supportsUtterance.current);
+    if (supportsUtterance.current && fallbackFor(r) === "retry-as-question") {
+      supportsUtterance.current = false; // older server: send the words as a question from now on
+      r = await ask(false);
+    }
+    dispatchCaption({ type: "interpreted", interpreted: r.interpreted });
+    const mode = r.interpreted?.mode ?? concreteMode(st.mode);
+    const language = r.interpreted?.language ?? st.language;
+    const next: Shot = {
+      id: nextId.current++,
+      photo,
+      mode,
+      language,
+      result: r,
+      followUps: [],
+      web: { status: "idle" },
+      asked: text,
+      thread,
+      createdAt: Date.now(),
+      ...(st.mode === "auto" ? { label: headerLabel("auto", r.interpreted) } : {}),
+    };
+    setShot(next);
+    shotRef.current = next;
+    setBusyBoth(false);
+    if (token !== speakToken.current) return; // the user started something else meanwhile
+    setSheet("result");
+    dispatchCaption(r.error ? { type: "failed", message: r.spokenText } : { type: "answered" });
+    if (r.error) haptic.error();
+    else haptic.success();
+    say(r.spokenText, mode === "translate" ? languageCode(language) : "en-US", { token });
+    const wantsLookup = !r.error && (r.autoLookup || (r.webQuery && r.itemKind && r.itemKind !== "none"));
+    if (wantsLookup) void runLookup(next, true, r.autoLookup ? "autoLookup" : "automatic");
+  }
+
+  const onMicPressIn = () => {
+    if (!lookingAvailable) return void toggleMic("main");
+    if (looking.current.recording) {
+      looking.current.ignoreRelease = true; // second tap in tap-to-talk mode: send now
+      return void finishLooking();
+    }
+    looking.current.ignoreRelease = false;
+    void startLooking();
+  };
+  const onMicPressOut = () => {
+    if (!lookingAvailable || looking.current.ignoreRelease) return;
+    // Held: release sends. A quick tap keeps listening until silence or a second tap.
+    if (looking.current.recording && Date.now() - looking.current.pressedAt >= 350) void finishLooking();
+  };
+
   const closeResult = () => {
     if (recording) void stopRecording();
     setSheet("none");
   };
 
-  const changeMode = (m: Mode) => {
+  const changeMode = (m: StripMode) => {
     if (m === settings.mode) return;
     haptic.tick();
     update({ mode: m });
-    if (live.current.screenReader) AccessibilityInfo.announceForAccessibility(`${MODE_LABELS[m]}. ${MODE_HINTS[m]}`);
+    if (live.current.screenReader) {
+      AccessibilityInfo.announceForAccessibility(m === "barcode" ? "Barcode mode. Point at a barcode." : `${STRIP_LABELS[m]} mode`);
+    } else if (m === "barcode") speech.hint("Point at a barcode");
   };
+
+  // Swipe left/right on the viewfinder to change mode (iOS Camera); a plain tap captures.
+  const swipe = useRef({ change: changeMode, capture: () => {}, mode: settings.mode });
+  swipe.current = { change: changeMode, capture: () => void capture(), mode: settings.mode };
+  const modeSwipe = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onPanResponderRelease: (_e, g) => {
+        const { change, capture: snap, mode: cur } = swipe.current;
+        if (Math.abs(g.dx) > 50 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5) {
+          const i = STRIP_MODES.indexOf(cur) + (g.dx < 0 ? 1 : -1);
+          if (i >= 0 && i < STRIP_MODES.length) change(STRIP_MODES[i]);
+        } else if (Math.abs(g.dx) < 8 && Math.abs(g.dy) < 8) {
+          snap();
+        }
+      },
+    }),
+  ).current;
 
   const toggleAuto = () => {
     haptic.tick();
     const next = !settings.autoCapture;
     update({ autoCapture: next, autoOffByServer: false });
-    if (live.current.screenReader) AccessibilityInfo.announceForAccessibility(next ? "Auto on" : "Auto off");
+    if (live.current.screenReader) AccessibilityInfo.announceForAccessibility(next ? "Detect on" : "Detect off");
   };
 
   // ---- render -----------------------------------------------------------------------------------
-  const camGranted = demo ? true : !!camPerm?.granted;
+  const micListening = caption.phase === "listening" || (recording && !lookingAvailable);
   const last = shot?.result && !shot.result.error ? shot : null;
 
   return (
@@ -883,107 +1376,297 @@ function Main() {
         />
       ) : null}
 
-      {/* Viewfinder: the hero. The whole area is also a capture target. */}
+      {/* Camera screen: full-bleed viewfinder with iOS Camera-style controls on top. */}
       {!hat ? (
-      <View style={StyleSheet.absoluteFill}>
-        {demo ? (
-          <Image source={demo.photo} style={StyleSheet.absoluteFill} contentFit="cover" />
-        ) : camGranted ? (
-          <CameraView
-            ref={camera}
-            style={StyleSheet.absoluteFill}
-            facing="back"
-            active={sheet === "none" && appActive}
-            pictureSize={pictureSize}
-            onCameraReady={() => void onCameraReady()}
-          />
-        ) : (
-          <View style={[StyleSheet.absoluteFill, s.permission, { paddingTop: insets.top + 96 }]}>
-            <Text style={type.largeTitle} accessibilityRole="header">
-              Camera access
-            </Text>
-            <Text style={[type.body, { color: colors.secondary }]}>
-              SightLine needs the camera to see what's in front of you. You can also pick a photo from your library.
-            </Text>
-            <PillButton
-              label={camPerm?.canAskAgain === false ? "Open Settings" : "Allow camera"}
-              onPress={() => (camPerm?.canAskAgain === false ? void Linking.openSettings() : void requestCamPerm())}
-              style={{ alignSelf: "flex-start" }}
+        <View style={StyleSheet.absoluteFill} {...modeSwipe.panHandlers}>
+          {demo ? (
+            <Image source={demo.photo} style={StyleSheet.absoluteFill} contentFit="cover" />
+          ) : camGranted ? (
+            <CameraView
+              ref={camera}
+              style={StyleSheet.absoluteFill}
+              facing="back"
+              active={sheet === "none" && appActive}
+              animateShutter={false}
+              flash="off"
+              onCameraReady={onCameraReady}
+              barcodeScannerSettings={{ barcodeTypes: ["ean13", "ean8", "upc_a", "upc_e"] }}
+              onBarcodeScanned={barcodeOn ? onBarcode : undefined}
             />
-          </View>
-        )}
-      </View>
+          ) : (
+            <View style={[StyleSheet.absoluteFill, s.permission, { paddingTop: insets.top + 96 }]}>
+              <Text style={type.largeTitle} accessibilityRole="header">
+                Camera access
+              </Text>
+              <Text style={[type.body, { color: colors.secondary }]}>
+                SightLine needs the camera to see what's in front of you. You can also pick a photo from your library.
+              </Text>
+              <PillButton
+                label={camPerm?.canAskAgain === false ? "Open Settings" : "Allow camera"}
+                onPress={() => (camPerm?.canAskAgain === false ? void Linking.openSettings() : void requestCamPerm())}
+                style={{ alignSelf: "flex-start" }}
+              />
+            </View>
+          )}
+          {camGranted ? (
+            <View
+              style={StyleSheet.absoluteFill}
+              accessible
+              accessibilityRole="button"
+              accessibilityLabel="Camera viewfinder"
+              accessibilityHint={`Double-tap to capture in ${STRIP_LABELS[mode]} mode. Swipe left or right to change mode.`}
+              onAccessibilityTap={capture}
+            />
+          ) : null}
+        </View>
       ) : null}
-      {camGranted && !hat ? (
-        <Pressable
-          style={StyleSheet.absoluteFill}
-          onPress={capture}
-          disabled={busy}
-          accessibilityRole="button"
-          accessibilityLabel="Camera viewfinder"
-          accessibilityHint={`Double-tap to capture in ${MODE_LABELS[mode]} mode`}
+
+      {!hat ? (
+        <>
+          {/* Scrims keep the controls legible over any image. */}
+          <LinearGradient
+            colors={["rgba(0,0,0,0.45)", "rgba(0,0,0,0)"]}
+            style={[s.scrimTop, { height: insets.top + 90 }]}
+            pointerEvents="none"
+          />
+          <LinearGradient
+            colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.7)"]}
+            style={[s.scrimBottom, { height: insets.bottom + 260 }]}
+            pointerEvents="none"
+          />
+
+          {/* Top: Auto, Recent, Settings */}
+          <View style={[s.camTop, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
+            <CamButton
+              role="switch"
+              label="Detect"
+              on={settings.autoCapture}
+              hint="Offers a card when it sees something to read. Long-press for the debug readout."
+              onPress={toggleAuto}
+              onLongPress={() => {
+                haptic.tick();
+                setShowDebug((v) => !v);
+              }}
+            >
+              <Icon
+                sf="viewfinder"
+                ion="scan-outline"
+                size={20}
+                color={settings.autoCapture ? colors.label : "#FFFFFF"}
+              />
+              <Text style={[s.camTopText, settings.autoCapture && { color: colors.label }]} maxFontSizeMultiplier={1.4}>
+                {settings.autoCapture ? "DETECT" : "DETECT OFF"}
+              </Text>
+            </CamButton>
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              {historyOn || askOn ? (
+                <CamButton label="Recent scans" onPress={() => void openRecent()}>
+                  <Icon sf="clock.arrow.circlepath" ion="time-outline" size={24} color="#FFFFFF" />
+                </CamButton>
+              ) : null}
+              <CamButton label="Settings" onPress={() => setSheet("settings")}>
+                <Icon sf="gearshape" ion="settings-outline" size={24} color="#FFFFFF" />
+              </CamButton>
+            </View>
+          </View>
+
+          {mode === "barcode" ? (
+            <View style={s.aimWrap} pointerEvents="none">
+              <View style={s.aimFrame} />
+              <Frost dark style={s.statusPill}>
+                <Text style={[s.statusText, { fontSize: 17 }]} accessibilityLabel="Point at a barcode">
+                  Point at a barcode
+                </Text>
+              </Frost>
+            </View>
+          ) : null}
+
+          {/* Upper third: captions, hints, server status */}
+          <View style={[s.caption, { top: insets.top + 70 }]} pointerEvents="box-none">
+            {caption.phase === "listening" ? (
+              <Frost style={s.captionPill}>
+                <View
+                  style={s.bars}
+                  accessible
+                  accessibilityLabel="Listening"
+                  accessibilityLiveRegion="polite"
+                >
+                  {[0.45, 0.8, 1, 0.7, 0.4].map((w, i) => (
+                    <View
+                      key={i}
+                      style={[s.bar, { height: reduceMotion ? 8 : 4 + Math.round(14 * Math.min(1, level * w * 1.4)) }]}
+                    />
+                  ))}
+                </View>
+                <Text style={[type.headline, { color: colors.label }]}>Listening…</Text>
+              </Frost>
+            ) : caption.phase !== "idle" ? (
+              <View style={{ alignItems: "center", gap: 10 }}>
+                {caption.text ? (
+                  <Frost style={s.captionCard}>
+                    <Text style={s.captionQuote} accessibilityLabel={`You asked: ${caption.text}`}>
+                      “{caption.text}”
+                    </Text>
+                  </Frost>
+                ) : null}
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                  {frozen ? <Image source={{ uri: frozen }} style={s.frozen} contentFit="cover" accessible={false} /> : null}
+                  {caption.status || caption.phase === "transcribing" ? (
+                    <Frost dark style={s.statusPill}>
+                      <Text style={s.statusText}>{caption.phase === "transcribing" ? "Listening back…" : caption.status}</Text>
+                    </Frost>
+                  ) : null}
+                </View>
+              </View>
+            ) : connection.state === "down" && !demo ? (
+              <Pressable
+                onPress={() => setSheet("settings")}
+                accessibilityRole="button"
+                accessibilityLabel="Can't reach the SightLine server. Open settings."
+              >
+                <Frost style={s.captionPill}>
+                  <Icon sf="wifi.exclamationmark" ion="cloud-offline-outline" size={18} color={colors.label} />
+                  <Text style={[type.subhead, { color: colors.label, fontWeight: "600" }]}>Can't reach the server</Text>
+                </Frost>
+              </Pressable>
+            ) : hint && !detection ? (
+              <Frost style={s.captionPill}>
+                <Icon sf="viewfinder" ion="scan-outline" size={18} color={colors.label} />
+                <Text style={[type.subhead, { color: colors.label, fontWeight: "600", flexShrink: 1 }]} accessibilityLabel={hint}>
+                  {hint}
+                </Text>
+              </Frost>
+            ) : null}
+          </View>
+
+          {/* Bottom: detection pill, mode strip, then thumbnail · shutter · mic */}
+          <View style={[s.camBottom, { paddingBottom: insets.bottom + 14 }]} pointerEvents="box-none">
+            {barcodeCard ? (
+              <DetectionCard
+                detection={
+                  sheet === "none"
+                    ? { key: barcodeCard.code, label: barcodeCard.title ?? (barcodeCard.found ? "Product" : "Unknown product"), mode: null, confidence: null }
+                    : null
+                }
+                kindLabel="Barcode"
+                reduceMotion={reduceMotion}
+                onPress={readBarcode}
+                onDismiss={dismissBarcode}
+              />
+            ) : (
+              <DetectionCard
+                detection={sheet === "none" ? detection : null}
+                reduceMotion={reduceMotion}
+                onPress={readDetection}
+                onDismiss={dismissDetection}
+              />
+            )}
+            {mode === "read" && !detection && !barcodeCard ? (
+              <Pressable
+                onPress={startBook}
+                accessibilityRole="button"
+                accessibilityLabel="Read a book"
+                accessibilityHint="Reads a book aloud page by page. Turn the page when asked."
+                style={{ alignSelf: "center" }}
+              >
+                <Frost style={s.bookPill}>
+                  <Icon sf="book.fill" ion="book" size={22} color={colors.label} />
+                  <Text style={[type.headline, { color: colors.label, fontWeight: "800" }]}>Read a book</Text>
+                </Frost>
+              </Pressable>
+            ) : null}
+            <ModeStrip mode={mode} onChange={changeMode} language={settings.language} onLanguage={() => setSheet("language")} />
+            <View style={s.camRow}>
+              <LastThumb
+                uri={last?.photo?.uri ?? null}
+                label={last ? `Last answer: ${last.result!.spokenText}` : "Choose a photo"}
+                hint={last ? "Opens the last answer" : "Picks a photo from your library"}
+                onPress={last ? () => setSheet("result") : pickPhoto}
+                actions={[
+                  ...(last ? [{ name: "library", label: "Choose a photo" }] : []),
+                  ...(historyOn || askOn ? [{ name: "recent", label: "Recent scans" }] : []),
+                ]}
+                onAction={(name) => (name === "library" ? void pickPhoto() : void openRecent())}
+              />
+              <Shutter
+                onPress={capture}
+                busy={busy}
+                disabled={!camGranted}
+                label={busy ? "Looking" : mode === "barcode" ? "Read the package" : `Capture, ${STRIP_LABELS[mode]} mode`}
+                glyph={mode === "barcode" ? <Icon sf="barcode" ion="barcode-outline" size={34} color={colors.label} /> : undefined}
+              />
+              {connection.features.transcribe !== false && (Platform.OS !== "web" || demo) ? (
+                <Pressable
+                  onPressIn={onMicPressIn}
+                  onPressOut={onMicPressOut}
+                  accessibilityRole="button"
+                  accessibilityLabel={micListening ? "Stop and ask" : "Ask about what's in front of you"}
+                  accessibilityHint={
+                    micListening ? "Sends your question" : 'Hold and speak, or tap and speak. For example, "what does this sign say?"'
+                  }
+                  style={({ pressed }) => [s.camMic, micListening && s.camMicOn, pressed && { opacity: 0.8 }]}
+                >
+                  {micListening ? <View style={s.recDot} /> : <Icon sf="mic.fill" ion="mic" size={30} color="#FFFFFF" />}
+                </Pressable>
+              ) : (
+                <View style={{ width: 72 }} />
+              )}
+            </View>
+          </View>
+        </>
+      ) : null}
+
+      {bookActive && !hat ? (
+        <BookView
+          book={book}
+          speakingOwner={speakingOwner}
+          rate={settings.rate}
+          topInset={insets.top}
+          bottomInset={insets.bottom}
+          recording={recording && voiceTarget.current === "book"}
+          onPause={() => dispatchBook({ type: "pause" })}
+          onResume={() => dispatchBook({ type: "resume" })}
+          onBack={() => dispatchBook({ type: "back" })}
+          onNext={() => dispatchBook({ type: "nextPage" })}
+          onAsk={() => {
+            if (recording) return void toggleMic("book");
+            dispatchBook({ type: "ask" });
+            void toggleMic("book");
+          }}
+          onEnd={() => dispatchBook({ type: "end" })}
+          onRetake={() => dispatchBook({ type: "retake" })}
+          onRate={(rate) => update({ rate })}
         />
       ) : null}
 
-      {/* Top bar */}
-      <View style={[s.top, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
-        <View style={[s.wordmark, hat && { backgroundColor: colors.surface }]} accessibilityRole="header">
-          <Text style={[type.headline, { fontWeight: "700" }]} maxFontSizeMultiplier={1.6} numberOfLines={1}>
-            SightLine
-          </Text>
-        </View>
-        <View style={s.topRight}>
-          {!hat ? (
-          <Pressable
-            onPress={toggleAuto}
-            onLongPress={() => {
-              haptic.tick();
-              setShowDebug((v) => !v);
-            }}
-            delayLongPress={600}
-            accessibilityRole="switch"
-            accessibilityLabel="Auto capture"
-            accessibilityHint="Reads automatically when you hold the phone steady on something"
-            accessibilityState={{ checked: settings.autoCapture }}
-            hitSlop={4}
-            style={({ pressed }) => [
-              s.autoPill,
-              settings.autoCapture && s.autoPillOn,
-              pressed && { opacity: 0.75 },
-            ]}
-          >
-            <Icon
-              sf={settings.autoCapture ? "sparkles" : "hand.tap"}
-              ion={settings.autoCapture ? "sparkles" : "hand-left-outline"}
-              size={16}
-              color={settings.autoCapture ? colors.onPrimary : colors.label}
-            />
-            <Text
-              style={[type.subhead, { fontWeight: "600", color: settings.autoCapture ? colors.onPrimary : colors.label }]}
-              maxFontSizeMultiplier={1.6}
-            >
-              {settings.autoCapture ? "Auto on" : "Auto off"}
+      {/* Hat mode keeps its own top bar */}
+      {hat ? (
+        <View style={[s.top, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
+          <View style={[s.wordmark, { backgroundColor: colors.surface }]} accessibilityRole="header">
+            <Text style={[type.headline, { fontWeight: "700" }]} maxFontSizeMultiplier={1.6} numberOfLines={1}>
+              SightLine
             </Text>
-          </Pressable>
-          ) : null}
-          {historyOn || askOn ? (
-            <IconButton onPress={() => void openRecent()} label="Recent scans" filled={hat ? "surface" : "white"}>
-              <Icon sf="clock.arrow.circlepath" ion="time-outline" />
+          </View>
+          <View style={s.topRight}>
+            {historyOn || askOn ? (
+              <IconButton onPress={() => void openRecent()} label="Recent scans" filled="surface">
+                <Icon sf="clock.arrow.circlepath" ion="time-outline" />
+              </IconButton>
+            ) : null}
+            <IconButton onPress={() => setSheet("settings")} label="Settings" filled="surface">
+              <Icon sf="gearshape" ion="settings-outline" />
             </IconButton>
-          ) : null}
-          <IconButton onPress={() => setSheet("settings")} label="Settings" filled={hat ? "surface" : "white"}>
-            <Icon sf="gearshape" ion="settings-outline" />
-          </IconButton>
+          </View>
         </View>
-      </View>
-      {showDebug ? (
-        <View style={[s.debug, { top: insets.top + 60 }]} accessible accessibilityLabel="Auto capture debug readout">
+      ) : null}
+      {showDebug && !hat ? (
+        <View style={[s.debug, { top: insets.top + 60 }]} accessible accessibilityLabel="Detect debug readout">
           <Text style={s.debugText}>
             {[
-              `auto: ${autoEnabled ? "running" : `paused (${pausedReasons.join(", ") || "?"})`}`,
+              `detect: ${autoEnabled ? "running" : `paused (${pausedReasons.join(", ") || "?"})`}`,
               `motion: ${debug?.motion ?? "-"}  steady: ${debug ? (debug.steady ? `yes ${debug.steadyMs}ms` : "no") : "-"}`,
               `rot ${debug?.rot.toFixed(1) ?? "-"} deg/s  acc ${debug?.acc.toFixed(2) ?? "-"} m/s2`,
-              `checks: ${debug?.checks ?? 0}${debug?.inFlight ? " (in flight)" : ""}  last: ${debug?.lastMs ?? 0}ms${
+              `checks: ${debug?.checks ?? 0}${debug?.inFlight ? " (in flight)" : ""}  dark skipped: ${debug?.darkSkipped ?? 0}  last: ${debug?.lastMs ?? 0}ms${
                 debug?.lastAt ? `, ${Math.round((Date.now() - debug.lastAt) / 1000)}s ago` : ""
               }`,
               `result: ${debug?.last ?? "-"}`,
@@ -991,101 +1674,6 @@ function Main() {
             ].join("\n")}
           </Text>
         </View>
-      ) : null}
-      {hint && !detection && !hat && (connection.state !== "down" || demo) ? (
-        <View style={[s.banner, { top: insets.top + 64 }]} accessible accessibilityLabel={hint}>
-          <Icon sf="viewfinder" ion="scan-outline" size={18} />
-          <Text style={[type.subhead, { color: colors.label, fontWeight: "600", flexShrink: 1 }]}>{hint}</Text>
-        </View>
-      ) : null}
-      {connection.state === "down" && !demo && !hat ? (
-        <Pressable
-          onPress={() => setSheet("settings")}
-          accessibilityRole="button"
-          accessibilityLabel="Can't reach the SightLine server. Open settings."
-          style={[s.banner, { top: insets.top + 64 }]}
-        >
-          <Icon sf="wifi.exclamationmark" ion="cloud-offline-outline" size={18} />
-          <Text style={[type.subhead, { color: colors.label, fontWeight: "600", flexShrink: 1 }]}>
-            Can't reach the server
-          </Text>
-        </Pressable>
-      ) : null}
-
-      {/* Bottom sheet: modes and the capture button */}
-      {!hat ? (
-      <View style={[s.sheet, { paddingBottom: insets.bottom + 12 }]}>
-        <ModeGrid mode={mode} onChange={changeMode} />
-        <Text style={type.subhead}>{MODE_HINTS[mode]}</Text>
-
-        {mode === "translate" ? (
-          <Pressable
-            onPress={() => setSheet("language")}
-            accessibilityRole="button"
-            accessibilityLabel={`Translate to ${settings.language}`}
-            accessibilityHint="Changes the language"
-            style={({ pressed }) => [s.langRow, pressed && { backgroundColor: colors.surfacePressed }]}
-          >
-            <Text style={[type.body, { flex: 1 }]}>Translate to</Text>
-            <Text style={[type.body, { fontWeight: "600" }]}>{settings.language}</Text>
-            <Icon sf="chevron.right" ion="chevron-forward" size={15} color={colors.secondary} />
-          </Pressable>
-        ) : null}
-
-        <DetectionCard detection={sheet === "none" ? detection : null} reduceMotion={reduceMotion} onPress={readDetection} />
-
-        {last && sheet === "none" && !detection ? (
-          <Pressable
-            onPress={() => setSheet("result")}
-            accessibilityRole="button"
-            accessibilityLabel={`Last answer: ${last.result!.spokenText}`}
-            accessibilityHint="Opens the answer"
-            style={({ pressed }) => [s.lastRow, pressed && { backgroundColor: colors.surfacePressed }]}
-          >
-            {last.photo ? <Image source={{ uri: last.photo.uri }} style={s.thumb} contentFit="cover" /> : null}
-            <Text style={[type.subhead, { flex: 1, color: colors.label }]} numberOfLines={2}>
-              {last.result!.spokenText}
-            </Text>
-            <Icon sf="chevron.right" ion="chevron-forward" size={15} color={colors.secondary} />
-          </Pressable>
-        ) : null}
-
-        <View style={s.captureRow}>
-          <IconButton onPress={pickPhoto} label="Choose a photo" hint="Picks a photo from your library" filled="surface" size={64}>
-            <Icon sf="photo.on.rectangle" ion="images-outline" size={26} />
-          </IconButton>
-          <PillButton
-            big
-            label={busy ? "Looking…" : "Capture"}
-            busy={busy}
-            disabled={!camGranted}
-            onPress={capture}
-            accessibilityLabel={busy ? "Looking" : `Capture, ${MODE_LABELS[mode]} mode`}
-            icon={busy ? undefined : <Icon sf="camera.fill" ion="camera" size={24} color={colors.onPrimary} />}
-            style={{ flex: 1 }}
-          />
-          {connection.features.transcribe !== false && (askOn || last) && (Platform.OS !== "web" || demo) ? (
-            <IconButton
-              onPress={() => void toggleMic("main")}
-              label={recording ? "Stop and ask" : transcribing ? "Listening back" : "Ask a question"}
-              hint={
-                recording
-                  ? "Stops recording and asks your question"
-                  : "Ask about the last photo, or about your earlier scans"
-              }
-              filled={recording ? "black" : "surface"}
-              size={64}
-            >
-              {recording ? <View style={s.recDot} /> : <Icon sf="mic.fill" ion="mic" size={26} />}
-            </IconButton>
-          ) : null}
-        </View>
-        {recording && sheet === "none" ? (
-          <Text style={[type.subhead, { color: colors.record, fontWeight: "600" }]} accessibilityLiveRegion="polite">
-            Listening. Tap the mic again when you're done.
-          </Text>
-        ) : null}
-      </View>
       ) : null}
 
       <ResultSheet
@@ -1265,6 +1853,60 @@ const s = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   thumb: { width: 44, height: 44, borderRadius: 10 },
+  scrimTop: { position: "absolute", top: 0, left: 0, right: 0 },
+  scrimBottom: { position: "absolute", bottom: 0, left: 0, right: 0 },
+  camTop: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  camTopText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800", letterSpacing: 1 },
+  camBottom: { position: "absolute", left: 0, right: 0, bottom: 0, gap: 12, paddingHorizontal: 16 },
+  camRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 12, marginTop: 4 },
+  camMic: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.85)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  camMicOn: { backgroundColor: "#FFFFFF" },
+  aimWrap: { position: "absolute", top: "30%", left: 0, right: 0, alignItems: "center", gap: 14 },
+  aimFrame: { width: 270, height: 150, borderRadius: 22, borderWidth: 4, borderColor: "#FFFFFF" },
+  bookPill: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 56, paddingHorizontal: 22, borderRadius: 28 },
+  captionPill: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 48, paddingHorizontal: 18, borderRadius: 24 },
+  statusPill: { minHeight: 36, paddingHorizontal: 14, borderRadius: 18, justifyContent: "center" },
+  statusText: { color: "#FFFFFF", fontSize: 15, fontWeight: "600" },
+  mic: { width: 76, height: 76, borderRadius: 38, backgroundColor: colors.surface, alignItems: "center", justifyContent: "center" },
+  micOn: { backgroundColor: colors.primary },
+  caption: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    alignItems: "center",
+    gap: 10,
+  },
+  captionCard: {
+    backgroundColor: colors.bg,
+    borderRadius: radius.card,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    gap: 6,
+    alignItems: "center",
+    maxWidth: "100%",
+  },
+  captionQuote: { fontSize: 26, lineHeight: 32, fontWeight: "700", letterSpacing: -0.3, color: colors.label, textAlign: "center" },
+  bars: { flexDirection: "row", alignItems: "flex-end", gap: 3, height: 18 },
+  bar: { width: 4, borderRadius: 2, backgroundColor: colors.record },
+  frozen: { width: 64, height: 64, borderRadius: 14, borderWidth: 2, borderColor: colors.bg },
   recDot: { width: 16, height: 16, borderRadius: 8, backgroundColor: colors.record },
   captureRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 4 },
 });

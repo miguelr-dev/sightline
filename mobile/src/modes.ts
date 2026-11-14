@@ -43,7 +43,7 @@ export function languageCode(name: string): string {
 export type ItemKind = "none" | "food_drink" | "product" | "medicine" | "restaurant" | "book" | "place";
 
 // Item-dependent groups chosen by the server (Nutrition, Ingredients, Warnings, Full text, ...).
-export type Section = { title: string; body: string };
+export type Section = { title: string; body: string; provenance?: "label" | "web" };
 
 export type AnalyzeResponse = {
   spokenText: string;
@@ -52,6 +52,10 @@ export type AnalyzeResponse = {
   webQuery?: string;
   itemKind?: ItemKind;
   scanId?: string; // server-side history id; passed back to /api/lookup
+  interpreted?: { mode: Mode; question?: string; language?: string }; // how an utterance was read
+  autoLookup?: boolean; // "search for this": run /api/lookup right after
+  httpStatus?: number; // set by the client
+  page?: import("./logic/book").BookPage; // book mode
   error?: boolean;
 };
 
@@ -78,9 +82,10 @@ export type Features = {
   history: boolean | null;
   ask: boolean | null; // "Ask your history" (/api/ask)
   hatCommands: boolean | null; // voice commands to the hat camera (/api/device/command)
+  barcode: boolean | null; // product lookup by barcode (/api/barcode)
 };
 
-export const UNKNOWN_FEATURES: Features = { elevenlabs: null, transcribe: null, lookup: null, history: null, ask: null, hatCommands: null };
+export const UNKNOWN_FEATURES: Features = { elevenlabs: null, transcribe: null, lookup: null, history: null, ask: null, hatCommands: null, barcode: null };
 
 export type FrameCheck = {
   ready: boolean;
@@ -102,7 +107,11 @@ export function cleanSections(v: unknown): Section[] {
       (x): x is Section =>
         !!x && typeof x === "object" && typeof (x as Section).title === "string" && typeof (x as Section).body === "string",
     )
-    .map((x) => ({ title: x.title.trim(), body: x.body.trim() }))
+    .map((x) => ({
+      title: x.title.trim(),
+      body: x.body.trim(),
+      ...(x.provenance === "label" || x.provenance === "web" ? { provenance: x.provenance } : {}),
+    }))
     .filter((x) => x.title && x.body);
 }
 
@@ -137,4 +146,16 @@ export type AskAnswer = {
   sections: Section[];
   scans: { id: string; title: string; createdAt: string }[];
   error?: boolean;
+};
+
+// GET /api/barcode: a product by its barcode.
+export type BarcodeResult = {
+  code: string;
+  found: boolean;
+  spokenText: string;
+  sections: Section[];
+  itemKind?: ItemKind;
+  image?: string;
+  title?: string;
+  scanId?: string;
 };

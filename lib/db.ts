@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
+import type { BarcodeResult } from "./barcode";
 import type { AnalyzeResponse, HistoryScan, LookupResponse, Mode, Section } from "./modes";
 
 // Server-only: Neon Postgres for caches and scan history, over Neon's HTTP driver.
@@ -53,6 +54,13 @@ export const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS scans_created_idx ON scans (created_at)`,
   `CREATE INDEX IF NOT EXISTS lookup_cache_created_idx ON lookup_cache (created_at)`,
   `CREATE INDEX IF NOT EXISTS analysis_cache_created_idx ON analysis_cache (created_at)`,
+  // Barcode answers by GTIN-14: products found are kept 7 days, misses 1 hour.
+  `CREATE TABLE IF NOT EXISTS barcode_cache (
+    key text PRIMARY KEY,
+    response jsonb NOT NULL,
+    found boolean NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
   // Hat camera: events the phone polls for, per-hat state, and hat-to-phone pairing.
   `CREATE TABLE IF NOT EXISTS device_events (
     id bigserial PRIMARY KEY,
@@ -80,6 +88,8 @@ export const SCHEMA = [
     phone_device text NOT NULL,
     paired_at timestamptz NOT NULL DEFAULT now()
   )`,
+  // Pairing is sticky: last_seen is the paired phone's last poll (see claimPairing).
+  `ALTER TABLE device_pairs ADD COLUMN IF NOT EXISTS last_seen timestamptz NOT NULL DEFAULT now()`,
 ];
 
 let client: Sql | null | undefined;
@@ -152,6 +162,7 @@ export function analysisKey(parts: {
   mode: string;
   language: string;
   question?: string;
+  conversation?: { question: string; answer: string }[]; // earlier turns change the answer
   model: string;
   version: string;
 }): string {
@@ -159,7 +170,14 @@ export function analysisKey(parts: {
     .update(parts.image)
     .update(
       "\0" +
-        [parts.mode, parts.language, parts.question ?? "", parts.model, parts.version].join("\0"),
+        [
+          parts.mode,
+          parts.language,
+          parts.question ?? "",
+          parts.model,
+          parts.version,
+          parts.conversation?.length ? JSON.stringify(parts.conversation) : "",
+        ].join("\0"),
     )
     .digest("hex");
 }
@@ -216,6 +234,30 @@ export async function getCachedLookup(key: string): Promise<LookupResponse | und
     READ_TIMEOUT_MS,
   );
   return (rows?.[0]?.response as LookupResponse | undefined) ?? undefined;
+}
+
+/** A cached barcode answer: 7 days for a product that was found, 1 hour for a miss. */
+export async function getCachedBarcode(key: string): Promise<BarcodeResult | undefined> {
+  const rows = await withDb(
+    "barcode cache read",
+    (db) =>
+      db`SELECT response FROM barcode_cache
+         WHERE key = ${key}
+           AND created_at > now() - CASE WHEN found THEN interval '7 days' ELSE interval '1 hour' END`,
+    READ_TIMEOUT_MS,
+  );
+  return (rows?.[0]?.response as BarcodeResult | undefined) ?? undefined;
+}
+
+export async function putCachedBarcode(key: string, response: BarcodeResult) {
+  await withDb(
+    "barcode cache write",
+    (db) =>
+      db`INSERT INTO barcode_cache (key, response, found)
+         VALUES (${key}, ${JSON.stringify(response)}::jsonb, ${response.found})
+         ON CONFLICT (key) DO UPDATE SET response = EXCLUDED.response, found = EXCLUDED.found,
+           created_at = now()`,
+  );
 }
 
 export async function putCachedLookup(key: string, response: LookupResponse) {
@@ -552,4 +594,46 @@ export async function pairHat(device: string, phone: string) {
       db`INSERT INTO device_pairs (device_id, phone_device) VALUES (${device}, ${phone})
          ON CONFLICT (device_id) DO UPDATE SET phone_device = EXCLUDED.phone_device, paired_at = now()`,
   );
+}
+
+/** How long the paired phone can go without polling before another phone may take the hat. */
+export const PAIRING_STALE_SECONDS = 60;
+
+/**
+ * Pair `phone` with the hat, or keep it paired, and note that it just polled. The first phone
+ * stays paired until it unpairs or stops polling for PAIRING_STALE_SECONDS; until then other
+ * phones get "elsewhere". Atomic, so two pollers can't flip the pairing back and forth.
+ * Undefined if the database can't be reached.
+ */
+export async function claimPairing(
+  device: string,
+  phone: string,
+): Promise<"ok" | "elsewhere" | undefined> {
+  const rows = await withDb(
+    "hat pairing",
+    (db) =>
+      db`INSERT INTO device_pairs (device_id, phone_device, paired_at, last_seen)
+         VALUES (${device}, ${phone}, now(), now())
+         ON CONFLICT (device_id) DO UPDATE SET
+           phone_device = EXCLUDED.phone_device,
+           paired_at = CASE WHEN device_pairs.phone_device = EXCLUDED.phone_device
+                            THEN device_pairs.paired_at ELSE now() END,
+           last_seen = now()
+         WHERE device_pairs.phone_device = EXCLUDED.phone_device
+            OR device_pairs.last_seen < now() - make_interval(secs => ${PAIRING_STALE_SECONDS})
+         RETURNING phone_device`,
+  );
+  if (rows === undefined) return undefined;
+  return rows.length ? "ok" : "elsewhere";
+}
+
+/** Unpair the hat, but only if `phone` is the one paired with it. */
+export async function unpairHat(device: string, phone: string): Promise<boolean> {
+  const rows = await withDb(
+    "hat unpair",
+    (db) =>
+      db`DELETE FROM device_pairs WHERE device_id = ${device} AND phone_device = ${phone}
+         RETURNING device_id`,
+  );
+  return Boolean(rows?.length);
 }

@@ -19,4 +19,12 @@ export type Shot = {
   followUps: FollowUp[];
   web: WebState;
   fromHistory?: boolean; // reopened from Recent: no photo data, so no follow-ups or retry
+  asked?: string;
+  key?: string;
+  label?: string; // header label override, e.g. "Barcode" or "Auto · Menu / Label"
+  strip?: import("./logic/modeStrip").StripMode; // the strip mode at capture ("auto": server picks)
+  suggested?: import("./modes").Mode | null; // detection card's suggestion (AUTO fallback)
+  webExplicit?: boolean;
+  thread?: { question: string; answer: string }[]; // earlier turns carried over (ask-while-looking)
+  createdAt?: number; // the user asked for the web lookup, so it may be spoken // frame-check key when read from the detection card (sent to analyze) // "ask while looking": the user's own words, shown at the top of the sheet
 };

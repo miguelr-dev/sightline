@@ -25,7 +25,7 @@ import * as db from "@/lib/db";
 import { analyzePhoto } from "@/lib/analyze";
 import { webLookup } from "@/lib/lookup";
 import { pairCode } from "@/lib/hat";
-import { putFrame, resetFrameStore } from "@/lib/frameStore";
+import { commandActive, putFrame, resetFrameStore } from "@/lib/frameStore";
 
 const KEY = "test-shared-key-for-unit-tests";
 const HAT = "hat-01";
@@ -177,6 +177,12 @@ describe("POST /api/device/command", () => {
       });
     });
 
+    it("marks the hat as busy with a command, so its auto-read stays quiet", async () => {
+      putFrame(HAT, FRAME);
+      await POST(command({ text: "read this" }));
+      expect(commandActive(HAT)).toBe(true);
+    });
+
     it("an explicit command reads even the target that was just read (claims with force)", async () => {
       putFrame(HAT, FRAME);
       await POST(command({ command: { type: "read" } }));
@@ -216,6 +222,21 @@ describe("POST /api/device/command", () => {
       expect(eventsOfKind("answer")[0]).toMatchObject({
         command: { type: "question", question: "How much is the salmon?" },
       });
+    });
+
+    it('an "auto" command lets the server choose the mode', async () => {
+      putFrame(HAT, FRAME);
+      analyzeReturns({ spokenText: "Red Bull Energy Drink.", itemKind: "food_drink", webQuery: "" });
+      vi.mocked(analyzePhoto).mockResolvedValueOnce({
+        body: { spokenText: "Red Bull Energy Drink.", details: "", sections: [], itemKind: "none" },
+        status: 200,
+        saved: Promise.resolve(),
+        mode: "menu",
+      });
+      await POST(command({ command: { type: "auto" } }));
+      await drain();
+      expect(analyzePhoto).toHaveBeenCalledWith(expect.objectContaining({ mode: "auto" }));
+      expect(eventsOfKind("answer")[0]).toMatchObject({ command: { type: "auto" }, mode: "menu" });
     });
 
     it("plain text that isn't a command becomes a question", async () => {
