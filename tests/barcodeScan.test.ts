@@ -17,6 +17,10 @@ describe("normalizeBarcode", () => {
     expect(normalizeBarcode("qr_code", "049000028911")).toBeNull();
   });
 
+  it("treats a 12-digit EAN-13 as UPC-A", () => {
+    expect(normalizeBarcode("ean_13", "049000028911")).toBe("049000028911");
+  });
+
   it("expands UPC-E to UPC-A", () => {
     expect(upcEToA("04252614")).toBe("042100005264");
     expect(normalizeBarcode("upc_e", "04252614")).toBe("042100005264");
