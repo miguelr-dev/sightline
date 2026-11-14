@@ -53,14 +53,14 @@ export default function Home() {
             <div className="step">
               <p className="num">01</p>
               <h3>Point.</h3>
-              <p>Open SightLine in your phone&apos;s browser and aim the camera at a page, a package, a sign, or the room.</p>
+              <p>Open SightLine and aim the camera at a page, a package, a sign, or the room. The corners show exactly what goes into the photo.</p>
             </div>
             <div className="step">
               <p className="num">02</p>
               <h3>Tap, say it, or just hold.</h3>
               <p>
-                Tap Capture, say “read this” or “translate to Spanish”, or turn on Auto and hold steady. SightLine spots the menu, label,
-                or sign and offers to read it.
+                Tap the shutter, say “read this” or “translate to Spanish”, or turn on Detect and hold steady. SightLine spots the menu,
+                label, or sign and offers to read it.
               </p>
             </div>
             <div className="step">
@@ -75,7 +75,7 @@ export default function Home() {
       {/* The four modes */}
       <section className="sec" id="features" aria-labelledby="modes-h" style={{ paddingBottom: 100 }}>
         <div className="wrap">
-          <SectionHead id="modes-h" eyebrow="Four modes" line1="One button." line2="Four ways to see." />
+          <SectionHead id="modes-h" eyebrow="Auto, or pick a mode" line1="One button." line2="Four ways to see." />
         </div>
         {/* Scrollable region: keyboard users can focus it and scroll with the arrow keys. */}
         <div className="rail" role="region" aria-label="The four modes, scroll sideways" tabIndex={0}>
