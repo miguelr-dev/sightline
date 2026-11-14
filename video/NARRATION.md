@@ -1,6 +1,6 @@
 # SightLine demo video: narration
 
-The voiceover for the 3-minute Devpost video. Each numbered clip below becomes one mp3 in `video/voiceover/`, so you can drop it into the editor and slide it to match the footage. The gaps between clips are where the app speaks its own answers, in its own voice (George), so keep the narrator a different voice.
+The voiceover for the 3-minute Devpost video. Each numbered clip below becomes one mp3 in `video/voiceover/`, so you can drop it into the editor and slide it to match the footage. The gaps between clips are where the app speaks its own answers. The app and the narrator are both Matilda, so SightLine sounds like one voice throughout.
 
 Regenerate after editing any line:
 

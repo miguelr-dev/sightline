@@ -8,11 +8,11 @@ const CACHE_MS = 60 * 60 * 1000;
 
 // Clear, calm voices that suit reading labels and menus, default voice first.
 const CURATED: { id: string; name: string; description: string }[] = [
-  { id: DEFAULT_VOICE_ID, name: "George", description: "Warm, clear storyteller. British, male." },
+  { id: DEFAULT_VOICE_ID, name: "Matilda", description: "Knowledgeable, professional. American, female." },
+  { id: "JBFqnCBsd6RMkjVDRZzb", name: "George", description: "Warm, clear storyteller. British, male." },
   { id: "Xb7hH8MSUJpSbSDYk0k2", name: "Alice", description: "Clear, engaging educator. British, female." },
   { id: "onwK4e9ZLuTAKqWW03F9", name: "Daniel", description: "Steady broadcaster. British, male." },
   { id: "EXAVITQu4vr4xnSDxMaL", name: "Sarah", description: "Mature, reassuring. American, female." },
-  { id: "XrExE9yKIg1WjnnlVkGX", name: "Matilda", description: "Knowledgeable, professional. American, female." },
   { id: "SAz9YHcvj6GT2YYXdXww", name: "River", description: "Relaxed, neutral, informative. American." },
   { id: "nPczCjzI2devNBz1zQrb", name: "Brian", description: "Deep, resonant, comforting. American, male." },
   { id: "hpp4J3VqNfWAUOO0d1Us", name: "Bella", description: "Professional, bright, warm. American, female." },

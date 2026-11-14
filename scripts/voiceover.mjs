@@ -17,7 +17,7 @@ const SCRIPT = path.join(ROOT, "video/NARRATION.md");
 const OUT = path.join(ROOT, "video/voiceover");
 const API = "https://api.elevenlabs.io/v1";
 
-// Narrator candidates. George is the app's own voice, so the narrator is someone else.
+// Narrator candidates. Matilda is also the app's own voice (lib/elevenlabs.ts).
 const VOICES = {
   brian: "nPczCjzI2devNBz1zQrb", // deep, resonant, American
   matilda: "XrExE9yKIg1WjnnlVkGX", // knowledgeable, professional, American
