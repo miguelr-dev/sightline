@@ -17,6 +17,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
     "@neondatabase/serverless": "1.2.0",
+    "barcode-detector": "3.2.3",
     "next": "16.4.6",
     "react": "19.3.0",
     "react-dom": "19.3.0"

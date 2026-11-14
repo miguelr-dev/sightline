@@ -1,15 +1,16 @@
 // A vector recreation of SightLine's camera-first iPhone app (mobile/src/components/CameraChrome.tsx):
 // a frosted Detect pill, camera corners that turn into yellow Live Text-style brackets on a detected
-// item, a frosted detection card, the 1× · 2× · 5× zoom pill, the AUTO · READ · DESCRIBE · MENU ·
-// TRANSLATE strip, a round shutter, and the white answer sheet with its magnify badge. Decorative: the
+// item, a frosted detection card, the 1× · 2× · 5× zoom pill, the AUTO · BARCODE · READ · DESCRIBE ·
+// MENU · TRANSLATE strip, a round shutter, and the white answer sheet with its magnify badge. Decorative: the
 // surrounding page carries the real text.
 
 /* eslint-disable @next/next/no-img-element -- static mockup imagery */
 import { ArrowUp, Chevron, Clock, Gear, Magnify, Mic, Viewfinder, Wave } from "./Icons";
 
-export type StripMode = "auto" | "read" | "describe" | "menu" | "translate";
+export type StripMode = "auto" | "barcode" | "read" | "describe" | "menu" | "translate";
 const STRIP: { key: StripMode; label: string }[] = [
   { key: "auto", label: "Auto" },
+  { key: "barcode", label: "Barcode" },
   { key: "read", label: "Read" },
   { key: "describe", label: "Describe" },
   { key: "menu", label: "Menu" },

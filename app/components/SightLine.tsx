@@ -9,13 +9,15 @@ import {
   findLanguage,
   type AnalyzeResponse,
   type AskResponse,
+  type BarcodeResponse,
   type Features,
   type LookupResponse,
   type Mode,
   type RequestMode,
   type Section,
 } from "@/lib/modes";
-import { captureVideoFrame, fileToBase64 } from "@/lib/image";
+import { captureVideoFrame, drawVideoCrop, fileToBase64 } from "@/lib/image";
+import { getDetector, initialScanState, normalizeBarcode, onAnswerClosed, onSighting } from "@/lib/barcodeScan";
 import { beepDone, beepError, beepStart, unlockAudio, vibrate } from "@/lib/feedback";
 import { useSpeech, type SpeakOptions } from "@/lib/useSpeech";
 import { listenOnce, parseCommand, recognitionSupported, type Listener } from "@/lib/voice";
@@ -31,6 +33,8 @@ const MIN_GAP_MS = 1500; // ignore accidental double captures
 const REQUEST_TIMEOUT_MS = 45_000;
 const LOOKUP_TIMEOUT_MS = 20_000; // the server stops itself at about 15 seconds
 const ASK_TIMEOUT_MS = 25_000;
+const BARCODE_TIMEOUT_MS = 20_000;
+const SCAN_EVERY_MS = 150; // pause between barcode scans of the viewfinder
 // Camera zoom, as in the iPhone app (mobile/src/logic/zoom.ts): 1×, 2× and 5× chips, or pinch.
 const ZOOM_CHIPS = [1, 2, 5] as const;
 const MAX_ZOOM = 5;
@@ -44,7 +48,13 @@ function zoomChips(z: number) {
 }
 
 type CameraState = "off" | "starting" | "on" | "unavailable";
-type Result = AnalyzeResponse & { mode: Mode; langCode: string; question?: string };
+type Result = AnalyzeResponse & { mode: Mode; langCode: string; question?: string; barcode?: string };
+// The camera's mode strip, as in the iPhone app (mobile/src/logic/modeStrip.ts): BARCODE reads
+// product barcodes; the shutter in BARCODE mode reads the package as Menu / Label instead.
+type StripMode = RequestMode | "barcode";
+const STRIP: StripMode[] = ["auto", "barcode", ...REQUEST_MODES.filter((m) => m !== "auto")];
+const asRequest = (m: StripMode): RequestMode => (m === "barcode" ? "menu" : m);
+const concrete = (m: StripMode): Mode => (m === "auto" ? "describe" : m === "barcode" ? "menu" : m);
 type WebState =
   | { status: "loading"; query: string }
   | { status: "done"; data: LookupResponse };
@@ -138,13 +148,18 @@ function Sections({ sections, fallback }: { sections?: Section[]; fallback?: str
   return fallback ? <p className="whitespace-pre-wrap text-[17px] leading-relaxed">{fallback}</p> : null;
 }
 
-const modeLabel = (m: RequestMode) => (m === "auto" ? "Auto" : MODE_LABELS[m]);
-const modeHint = (m: RequestMode) => (m === "auto" ? "SightLine picks the best mode for each photo." : MODE_HINTS[m]);
+const modeLabel = (m: StripMode) => (m === "auto" ? "Auto" : m === "barcode" ? "Barcode" : MODE_LABELS[m]);
+const modeHint = (m: StripMode) =>
+  m === "auto"
+    ? "SightLine picks the best mode for each photo."
+    : m === "barcode"
+      ? "Point at a product's barcode to hear what it is. The shutter reads the package instead."
+      : MODE_HINTS[m];
 
 export default function SightLine() {
   const [started, setStarted] = useState(false);
   const [camera, setCamera] = useState<CameraState>("off");
-  const [mode, setMode] = useState<RequestMode>("auto"); // Auto first, as in the iPhone app
+  const [mode, setMode] = useState<StripMode>("auto"); // Auto first, as in the iPhone app
   const [language, setLanguage] = useState("English");
   const [autoSpeak, setAutoSpeak] = useState(true);
   const [rate, setRateState] = useState(1);
@@ -163,6 +178,7 @@ export default function SightLine() {
   const [hwZoom, setHwZoom] = useState<HwZoom>(null);
   const [magnify, setMagnify] = useState(false);
   const [vfCenter, setVfCenter] = useState<string | undefined>(); // CSS zoom centres on the viewfinder
+  const [barcodeBox, setBarcodeBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const frameRef = useRef<HTMLDivElement>(null); // the viewfinder: what's inside it is what gets sent
@@ -176,6 +192,9 @@ export default function SightLine() {
   const lookupIdRef = useRef(0);
   const zoomRef = useRef(1);
   const pinchRef = useRef<{ d: number; z: number } | null>(null);
+  const scanRef = useRef(initialScanState);
+  const scanCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const scanFailedRef = useRef(false);
 
   const speech = useSpeech();
   const { speak, stop: stopSpeech, setRate, unlock: unlockSpeech, setElevenAvailable } = speech;
@@ -485,7 +504,7 @@ export default function SightLine() {
     (override?: { mode?: RequestMode; language?: string }) => {
       unlockAll();
       if (busyRef.current) return;
-      const m = override?.mode ?? latest.current.mode;
+      const m = override?.mode ?? asRequest(latest.current.mode);
       const lang = override?.language ?? latest.current.language;
       const video = videoRef.current;
       if (latest.current.camera !== "on" || !video) {
@@ -519,7 +538,7 @@ export default function SightLine() {
         const image = await fileToBase64(file);
         setLastImage(image);
         setDismissed(latest.current.result);
-        void analyze(image, { mode: latest.current.mode, language: latest.current.language });
+        void analyze(image, { mode: asRequest(latest.current.mode), language: latest.current.language });
       } catch {
         const msg = "I couldn't open that file. Please choose a photo.";
         setStatus(msg);
@@ -584,7 +603,7 @@ export default function SightLine() {
         sections,
         details: sections.map((x) => `${x.title}\n${x.body}`).join("\n\n"),
         error: data.error,
-        mode: latest.current.result?.mode ?? (latest.current.mode === "auto" ? "describe" : latest.current.mode),
+        mode: latest.current.result?.mode ?? concrete(latest.current.mode),
         langCode: speakLang,
         question: q,
       });
@@ -625,7 +644,7 @@ export default function SightLine() {
       }
       setQuestion("");
       void analyze(img, {
-        mode: latest.current.result?.mode ?? latest.current.mode,
+        mode: latest.current.result?.mode ?? asRequest(latest.current.mode),
         language: latest.current.language,
         question: q,
       });
@@ -645,9 +664,9 @@ export default function SightLine() {
 
   // ---------- Voice ----------
   const chooseMode = useCallback(
-    (m: RequestMode, announce = true) => {
+    (m: StripMode, announce = true) => {
       setMode(m);
-      if (announce) say(`${modeLabel(m)} mode.`);
+      if (announce) say(m === "barcode" ? "Barcode mode. Point at a barcode." : `${modeLabel(m)} mode.`);
     },
     [say],
   );
@@ -748,6 +767,136 @@ export default function SightLine() {
     [ask, handleCommand, say, stopSpeech, unlockAll],
   );
 
+  // ---------- Barcodes (BARCODE mode) ----------
+  /** Look up a confirmed barcode and open its answer, spoken right away, as in the iPhone app. */
+  const lookupBarcode = useCallback(
+    async (code: string, image: string | null) => {
+      if (busyRef.current) return;
+      busyRef.current = true;
+      setBusy(true);
+      stopSpeech();
+      lookupIdRef.current++;
+      setWeb(null);
+      beepStart();
+      vibrate(50);
+      setStatus("Barcode found. Looking it up…");
+      say("Barcode found");
+      if (image) setLastImage(image);
+      setDismissed(latest.current.result);
+
+      let data: BarcodeResponse;
+      let ok = false;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), BARCODE_TIMEOUT_MS);
+      try {
+        const res = await fetch(`/api/barcode?code=${encodeURIComponent(code)}`, { headers: deviceHeader(), signal: controller.signal });
+        data = (await res.json()) as BarcodeResponse;
+        ok = res.ok;
+      } catch (e) {
+        data = {
+          code,
+          found: false,
+          spokenText:
+            e instanceof DOMException && e.name === "AbortError"
+              ? "The barcode lookup took too long. Please try again."
+              : "Sorry, I couldn't look up that barcode. Check your connection and try again.",
+          sections: [],
+          itemKind: "none",
+        };
+      } finally {
+        clearTimeout(timer);
+      }
+
+      const sections = data.sections ?? [];
+      setResult({
+        spokenText: data.spokenText,
+        sections,
+        details: sections.map((x) => `${x.title}\n${x.body}`).join("\n\n"),
+        itemKind: data.itemKind,
+        scanId: data.scanId,
+        error: !ok,
+        mode: "menu",
+        langCode: "en-US",
+        barcode: code,
+      });
+      setStatus("");
+      if (ok && data.found) {
+        beepDone();
+        vibrate([40, 40, 40]);
+      } else {
+        beepError();
+        vibrate([120, 60, 120]);
+      }
+      say(data.spokenText);
+      busyRef.current = false;
+      setBusy(false);
+    },
+    [say, stopSpeech],
+  );
+
+  // Scan the viewfinder for a barcode a few times a second while BARCODE mode is on and no answer is open.
+  const sheetOpen = Boolean(result) && result !== dismissed;
+  const scanning = started && camera === "on" && mode === "barcode" && !sheetOpen && !magnify;
+  useEffect(() => {
+    if (!scanning) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const loop = async () => {
+      const video = videoRef.current;
+      const frame = frameRef.current;
+      try {
+        const detector = await getDetector();
+        if (stopped) return;
+        if (video && frame && !busyRef.current) {
+          const canvas = (scanCanvasRef.current ??= document.createElement("canvas"));
+          const rect = frame.getBoundingClientRect();
+          const k = drawVideoCrop(video, rect, canvas, 960);
+          if (k) {
+            const found = await detector.detect(canvas);
+            if (stopped) return;
+            const hit = found.map((d) => ({ d, code: normalizeBarcode(d.format, d.rawValue) })).find((x) => x.code);
+            if (hit?.code) {
+              const b = hit.d.boundingBox;
+              setBarcodeBox({ x: b.x * k, y: b.y * k, w: b.width * k, h: b.height * k });
+              const r = onSighting(scanRef.current, hit.code, Date.now());
+              scanRef.current = r.state;
+              if (r.confirmed) {
+                let image: string | null = null;
+                try {
+                  image = captureVideoFrame(video, rect);
+                } catch {
+                  // no photo for the answer sheet; the lookup still works
+                }
+                void lookupBarcode(hit.code, image);
+              }
+            } else setBarcodeBox(null);
+          }
+        }
+      } catch {
+        if (!scanFailedRef.current) {
+          scanFailedRef.current = true;
+          const msg = "Barcode scanning isn't available in this browser. Use the shutter to read the package.";
+          setStatus(msg);
+          say(msg);
+        }
+        return;
+      }
+      if (!stopped) timer = setTimeout(loop, SCAN_EVERY_MS);
+    };
+    void loop();
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [scanning, lookupBarcode, say]);
+
+  /** Close the answer sheet. In BARCODE mode the product is usually still in view, so wait a moment
+   *  before reading the same barcode again. */
+  const closeSheet = useCallback((r: Result) => {
+    setDismissed(r);
+    if (r.barcode) scanRef.current = onAnswerClosed(scanRef.current, Date.now());
+  }, []);
+
   // ---------- Settings ----------
   const toggleAutoSpeak = () => {
     const next = !autoSpeak;
@@ -804,7 +953,7 @@ export default function SightLine() {
 
   // ---------- Main screen: camera first, like the iPhone app ----------
   const cameraStatus = camera === "on" ? "Camera on" : camera === "starting" ? "Starting camera…" : "Camera off";
-  const showSheet = Boolean(result) && result !== dismissed;
+  const showSheet = sheetOpen;
   const frost = "bg-black/45 text-white backdrop-blur-md";
   const listeningText = recording ? "Listening… tap the mic when done" : "Listening…";
   // Whatever the camera's own zoom can't reach is made up by scaling the preview.
@@ -882,6 +1031,18 @@ export default function SightLine() {
           <span className="absolute right-0 top-0 h-9 w-9 rounded-tr-xl border-r-[3px] border-t-[3px] border-white" />
           <span className="absolute bottom-0 left-0 h-9 w-9 rounded-bl-xl border-b-[3px] border-l-[3px] border-white" />
           <span className="absolute bottom-0 right-0 h-9 w-9 rounded-br-xl border-b-[3px] border-r-[3px] border-white" />
+          {scanning && barcodeBox && (
+            // Yellow brackets lock onto the barcode, like the iPhone app's Live Text-style brackets.
+            <div
+              className="pointer-events-none absolute"
+              style={{ left: barcodeBox.x - 6, top: barcodeBox.y - 6, width: barcodeBox.w + 12, height: barcodeBox.h + 12 }}
+            >
+              <span className="absolute left-0 top-0 h-6 w-6 rounded-tl-lg border-l-[3px] border-t-[3px] border-[#FFD60A] drop-shadow-[0_0_2px_rgba(0,0,0,0.6)]" />
+              <span className="absolute right-0 top-0 h-6 w-6 rounded-tr-lg border-r-[3px] border-t-[3px] border-[#FFD60A] drop-shadow-[0_0_2px_rgba(0,0,0,0.6)]" />
+              <span className="absolute bottom-0 left-0 h-6 w-6 rounded-bl-lg border-b-[3px] border-l-[3px] border-[#FFD60A] drop-shadow-[0_0_2px_rgba(0,0,0,0.6)]" />
+              <span className="absolute bottom-0 right-0 h-6 w-6 rounded-br-lg border-b-[3px] border-r-[3px] border-[#FFD60A] drop-shadow-[0_0_2px_rgba(0,0,0,0.6)]" />
+            </div>
+          )}
           {camera !== "on" && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
               <p className="text-[17px] font-semibold">{cameraStatus}</p>
@@ -901,6 +1062,8 @@ export default function SightLine() {
             <p className="inline-flex items-center gap-2 rounded-full bg-[#D70015] px-4 py-2 text-[15px] font-semibold text-white">{listeningText}</p>
           ) : status && !showSheet ? (
             <p className={`max-w-full rounded-2xl px-4 py-2 text-center text-[15px] font-semibold ${frost}`}>{status}</p>
+          ) : scanning ? (
+            <p className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-[15px] font-semibold ${frost}`}>Point at a barcode</p>
           ) : null}
         </div>
 
@@ -949,7 +1112,7 @@ export default function SightLine() {
         <nav aria-label="Mode" className="mt-2 shrink-0">
           <div className="overflow-x-auto px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
            <div className="mx-auto flex w-max gap-0.5">
-            {REQUEST_MODES.map((m) => {
+            {STRIP.filter((m) => m !== "barcode" || features?.barcode).map((m) => {
               const on = mode === m;
               return (
                 <button
@@ -1029,9 +1192,9 @@ export default function SightLine() {
         >
           <div className="flex shrink-0 items-center justify-between gap-3 px-4 pb-2 pt-4">
             <h2 id="result-heading" className={caption}>
-              {result.question ? "Answer" : mode === "translate" && result.mode === "translate" ? `Translate to ${language}` : MODE_LABELS[result.mode]}
+              {result.question ? "Answer" : result.barcode ? "Barcode" : mode === "translate" && result.mode === "translate" ? `Translate to ${language}` : MODE_LABELS[result.mode]}
             </h2>
-            <button type="button" onClick={() => setDismissed(result)} className={`min-h-11 rounded-xl border-2 border-black px-4 text-[17px] font-semibold ${focus}`}>
+            <button type="button" onClick={() => closeSheet(result)} className={`min-h-11 rounded-xl border-2 border-black px-4 text-[17px] font-semibold ${focus}`}>
               Done
             </button>
           </div>
@@ -1113,7 +1276,7 @@ export default function SightLine() {
 
             {result.details && !busy && <Sections sections={result.sections} fallback={result.details} />}
 
-            {features?.lookup && !result.error && (
+            {features?.lookup && !result.error && !result.barcode && (
               <button
                 type="button"
                 onClick={() => {

@@ -50,6 +50,30 @@ export function captureVideoFrame(video: HTMLVideoElement, frame?: DOMRect | nul
   return dataUrl.slice(dataUrl.indexOf(",") + 1);
 }
 
+/** Draws what's inside the on-screen viewfinder (`frame`) onto `canvas`, at most `maxSide` px, for
+ *  barcode scanning. Returns how many screen pixels one canvas pixel covers, or null if the camera
+ *  isn't ready. Same mapping as captureVideoFrame (object-fit: cover, CSS zoom included). */
+export function drawVideoCrop(video: HTMLVideoElement, frame: DOMRect, canvas: HTMLCanvasElement, maxSide: number): number | null {
+  if (!video.videoWidth || !video.videoHeight || frame.width < 8 || frame.height < 8) return null;
+  const box = video.getBoundingClientRect();
+  const scale = Math.max(box.width / video.videoWidth, box.height / video.videoHeight);
+  const offX = box.left + (box.width - video.videoWidth * scale) / 2;
+  const offY = box.top + (box.height - video.videoHeight * scale) / 2;
+  const sx = (frame.left - offX) / scale;
+  const sy = (frame.top - offY) / scale;
+  const sw = frame.width / scale;
+  const sh = frame.height / scale;
+  const out = Math.min(1, maxSide / Math.max(sw, sh));
+  canvas.width = Math.max(1, Math.round(sw * out));
+  canvas.height = Math.max(1, Math.round(sh * out));
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return null;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+  return frame.width / canvas.width;
+}
+
 export async function fileToBase64(file: File): Promise<string> {
   // createImageBitmap respects EXIF orientation with this option.
   const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
