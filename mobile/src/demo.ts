@@ -65,6 +65,9 @@ type Demo = {
   scans: Scan[] | null;
   detection: { key: string; label: string; mode: Mode | null; confidence: number | null } | null;
   hat: boolean;
+  zoom: number;
+  detectBox: { rect: { x: number; y: number; w: number; h: number }; at: number } | null;
+  barcodeBox: { rect: { x: number; y: number; w: number; h: number }; at: number } | null;
   book: import("./logic/book").BookState | null;
   hatAsking: string | null;
   caption: { phase: "asking"; text: string; status: string } | null;
@@ -120,13 +123,16 @@ export function demoState(): Demo | null {
           : q === "recent" || q === "recent-ask"
             ? "recent"
             : "none",
-    mode: q === "translate" ? "translate" : q === "barcode-mode" ? "barcode" : "auto",
+    mode: q === "translate" ? "translate" : q === "barcode-mode" || q === "brackets-barcode" ? "barcode" : "auto",
     photo,
     voices: VOICES,
     hint: null,
     detection:
-      q === "home" || q === "hat" ? { key: "harbor-table-menu", label: "Harbor Table menu", mode: "menu", confidence: 0.92 } : null,
+      q === "home" || q === "hat" || q === "brackets-detect" ? { key: "harbor-table-menu", label: "Harbor Table menu", mode: "menu", confidence: 0.92 } : null,
     hat: q === "hat",
+    zoom: q === "zoom" ? 0.25 : 0,
+    detectBox: q === "brackets-detect" ? { rect: { x: 18, y: 64, w: 360, h: 300 }, at: Date.now() + 600_000 } : null,
+    barcodeBox: q === "brackets-barcode" ? { rect: { x: 96, y: 300, w: 200, h: 96 }, at: Date.now() + 600_000 } : null,
     book:
       q === "book" || q === "book-turn"
         ? {

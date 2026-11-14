@@ -1,0 +1,12 @@
+{
+    "code": "0305730150309",
+    "product": {
+        "allergens_tags": [],
+        "image_front_url": "https://images.openfoodfacts.org/images/products/030/573/015/0309/front_en.3.400.jpg",
+        "nutriscore_grade": "unknown",
+        "product_name": "Advil 50 tablets",
+        "traces_tags": []
+    },
+    "status": 1,
+    "status_verbose": "product found"
+}

@@ -53,12 +53,22 @@ export function checkPairCode(hatId: string, given: string | null): boolean {
 const SKIP_WORDS = new Set(["menu", "package", "label", "sign", "page", "slide", "scene", "box"]);
 const FILLER = new Set(["the", "and", "for", "with"]);
 
+/** Words that say what kind of product something is, not which one: two keys that share only
+ *  these ("monster-energy-drink", "red-bull-energy-drink") are different products. */
+export const GENERIC_WORDS = new Set([
+  "cookie", "cookies", "energy", "drink", "drinks", "cola", "soda", "chips", "chip", "bar", "bars",
+  "tablets", "tablet", "caplets", "capsules", "softgels", "pain", "reliever", "relief", "crackers",
+  "cracker", "snack", "snacks", "candy", "juice", "water", "sparkling", "original", "classic",
+  "flavor", "flavored", "extra", "strength", "diet", "zero", "sugar", "free", "cereal", "medicine",
+  "sandwich", "tea", "coffee",
+]);
+
 /** A key's distinctive words, sorted and hyphenated: "calle-mayor-precaucion". */
 export function matchKey(key: string): string {
   const words = [...new Set(key.toLowerCase().split("-"))].filter(
     (w) => w.length >= 3 && !FILLER.has(w),
   );
-  const named = words.filter((w) => !SKIP_WORDS.has(w));
+  const named = words.filter((w) => !SKIP_WORDS.has(w) && !GENERIC_WORDS.has(w));
   return (named.length ? named : words.length ? words : [key.toLowerCase()]).sort().join("-");
 }
 

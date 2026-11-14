@@ -58,6 +58,7 @@ export type BarcodeEvent =
   | { type: "seen"; code: string; at: number }
   | { type: "partial"; at: number } // a barcode is in view but didn't decode to a valid code
   | { type: "read"; code: string; at: number }
+  | { type: "sheetOpened" }
   | { type: "sheetClosed"; at?: number; holdMs?: number } // holdMs: keep ignoring the last code briefly
   | { type: "tick"; at: number };
 
@@ -67,6 +68,7 @@ const CONFIRM_MS = 500;
 const TICK_GAP_MS = 1000;
 const READ_DEDUPE_MS = 10_000;
 const GONE_MS = 1500;
+const PENDING_MS = 700; // an unconfirmed sighting expires (and stops pausing frame-check)
 
 export function reduceBarcode(s: BarcodeState, e: BarcodeEvent): { state: BarcodeState; effects: BarcodeEffect[] } {
   const tick = (at: number, state: BarcodeState) =>
@@ -91,13 +93,18 @@ export function reduceBarcode(s: BarcodeState, e: BarcodeEvent): { state: Barcod
       return tick(e.at, s);
     case "read":
       return { state: { ...s, pending: null, confirmed: null, read: { code: e.code, until: e.at + READ_DEDUPE_MS } }, effects: [] };
+    case "sheetOpened":
+      // The card never survives a sheet: it comes back only from fresh sightings.
+      return { state: { ...s, pending: null, confirmed: null }, effects: [{ type: "gone" }] };
     case "sheetClosed": {
       const hold = e.holdMs && e.at !== undefined && s.read ? { code: s.read.code, until: e.at + e.holdMs } : null;
-      return { state: { ...s, pending: null, confirmed: null, read: hold }, effects: [] };
+      return { state: { ...s, pending: null, confirmed: null, read: hold }, effects: [{ type: "gone" }] };
     }
-    case "tick":
-      if (s.confirmed && e.at - s.lastSeenAt >= GONE_MS) return { state: { ...s, confirmed: null }, effects: [{ type: "gone" }] };
-      return { state: s, effects: [] };
+    case "tick": {
+      const pending = s.pending && e.at - s.pending.at > PENDING_MS ? null : s.pending;
+      if (s.confirmed && e.at - s.lastSeenAt >= GONE_MS) return { state: { ...s, pending, confirmed: null }, effects: [{ type: "gone" }] };
+      return { state: pending === s.pending ? s : { ...s, pending }, effects: [] };
+    }
   }
 }
 

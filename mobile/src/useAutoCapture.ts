@@ -36,7 +36,7 @@ export type AutoDebug = {
   lastAt: number;
 };
 
-export type Frame = { image: string } | { dark: true; luma: number } | null;
+export type Frame = { image: string; w: number; h: number } | { dark: true; luma: number } | null;
 
 type Options = {
   enabled: boolean;
@@ -44,6 +44,7 @@ type Options = {
   check: (image: string, last: { lastKey?: string; lastLabel?: string }) => Promise<{ status: number; data: FrameCheck | null }>;
   onDetect: (d: Detection | null, appeared: boolean) => void; // null = nothing detected
   onHint: (hint: string) => void;
+  onBox?: (box: FrameCheck["box"] | null, frame: { w: number; h: number }) => void; // for the brackets
   onUnavailable: () => void;
   onDebug?: (d: AutoDebug) => void;
 };
@@ -164,6 +165,7 @@ export function useAutoCapture(opts: Options) {
         const out = reduceFrame(logic.current, data, Date.now());
         logic.current = out.state;
         o.current.onDetect(out.card, out.appeared);
+        o.current.onBox?.(out.card ? (data.box ?? null) : null, { w: frame.w, h: frame.h });
         if (out.speakHint) o.current.onHint(out.speakHint);
       } catch (e) {
         dbg.last = `error: ${e instanceof Error ? e.message : String(e)}`.slice(0, 120);
@@ -200,6 +202,8 @@ export function useAutoCapture(opts: Options) {
   return {
     /** Resolves once no frame grab is using the camera, so a manual capture never collides. */
     idle: () => grabbing.current ?? Promise.resolve(),
+    /** Is the phone being held roughly still right now (or is motion data unavailable)? */
+    isSteady: () => dbg.motion !== "live" || !!st.steadySince,
     /** A result sheet closed: offer whatever is in view again, even the same item. */
     resume: () => {
       logic.current = resumeAfterSheet(logic.current);

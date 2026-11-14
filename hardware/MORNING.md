@@ -76,8 +76,8 @@ The board arrives around 6 AM and the demo is at 12:30. The steps below should t
 Run the same pipeline from the Mac. The phone hears it exactly as if it came from the hat.
 
 ```bash
-npm run sim -- --webcam   # the Mac's FaceTime camera (allow Camera for Terminal the first time)
-npm run sim               # or cycle through the demo photos
+npm run sim -- --hat hat-01 --webcam   # the Mac's FaceTime camera (allow Camera for Terminal the first time)
+npm run sim -- --hat hat-01            # or cycle through the demo photos
 ```
 
 Press Enter in that terminal to "press BOOT". The default hat ID is `hat-01`, so the phone doesn't need re-pairing. If the iPhone is the Continuity Camera, `--camera 1` picks the built-in camera.

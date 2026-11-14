@@ -1,7 +1,13 @@
 import { after } from "next/server";
 import { randomUUID } from "node:crypto";
 import { LANGUAGES, type BarcodeResponse } from "@/lib/modes";
-import { gtin14, lookupBarcode, translateBarcode, validBarcode } from "@/lib/barcode";
+import {
+  barcodeCacheKey,
+  gtin14,
+  lookupBarcode,
+  translateBarcode,
+  validBarcode,
+} from "@/lib/barcode";
 import { dbConfigured, deviceId, getCachedBarcode, insertScan, putCachedBarcode } from "@/lib/db";
 
 // Barcode lookup for grocery shopping: GET /api/barcode?code=<digits>&language=<name>.
@@ -33,7 +39,7 @@ export async function GET(request: Request) {
   }
   const langParam = url.searchParams.get("language");
   const language = langParam && LANGUAGES.some((l) => l.name === langParam) ? langParam : "English";
-  const cacheKey = language === "English" ? gtin14(code) : `${gtin14(code)}:${language}`;
+  const cacheKey = barcodeCacheKey(code, language);
 
   const hit = await getCachedBarcode(cacheKey);
   const result = hit ?? (await translateBarcode(await lookupBarcode(code), language));
