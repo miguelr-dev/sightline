@@ -1,16 +1,19 @@
 import { DeviceMotion } from "expo-sensors";
 import { useEffect, useRef } from "react";
-import { MODES, type FrameCheck, type Mode } from "./modes";
+import { initialAutoState, markRead as markReadState, reduceFrame, type AutoState } from "./logic/autoCapture";
+import type { FrameCheck } from "./modes";
 
-// Semi-automatic reading. While enabled, waits until the phone is held roughly still, grabs a
-// small silent frame and asks /api/frame-check what's in view.
-// - detected: show a tappable suggestion card (onDetect).
-// - ready twice in a row with the same key and confidence >= 0.7: read it automatically (onReady),
-//   once per key, until the camera has moved on to something else.
+export type { Detection } from "./logic/autoCapture";
+import type { Detection } from "./logic/autoCapture";
+
+// Auto mode. While enabled, waits until the phone is held roughly still, grabs a small silent
+// frame and asks /api/frame-check what's in view. It never reads by itself: it only offers a
+// tappable card (onDetect) and the occasional hint. Decisions live in logic/autoCapture.ts.
 // Checks run back to back (each ~1-2 s), never overlapping.
 
 const STEADY_MS = 600;
 const MIN_GAP_MS = 150; // pause after one check finishes before the next starts
+const DARK_RETRY_MS = 700; // a black frame is retried soon, without a server call
 const ERROR_BACKOFF_MS = 3000;
 const TICK_MS = 150;
 const NO_MOTION_GAP_MS = 400; // without motion data, keep checking back to back
@@ -18,12 +21,6 @@ const NO_MOTION_GAP_MS = 400; // without motion data, keep checking back to back
 const ROT_STEADY = 35; // deg/s
 const ACC_STEADY = 0.6; // m/s^2, gravity removed
 const SMOOTH = 4; // samples at 100 ms
-const AUTO_CONFIDENCE = 0.7;
-const REARM_NOT_READY = 3; // this many checks without the key = the camera moved on
-const HINT_REPEAT_MS = 3000;
-const HINT_GAP_MS = 5000;
-
-export type Detection = { key: string; label: string; mode: Mode | null; confidence: number | null };
 
 export type AutoDebug = {
   motion: "waiting" | "live" | "unavailable" | "denied";
@@ -33,41 +30,34 @@ export type AutoDebug = {
   acc: number;
   inFlight: boolean;
   checks: number;
+  darkSkipped: number;
   last: string; // last frame-check result, short
   lastMs: number;
   lastAt: number;
 };
 
+export type Frame = { image: string } | { dark: true; luma: number } | null;
+
 type Options = {
   enabled: boolean;
-  takeFrame: () => Promise<string | null>; // base64 JPEG ~512 px
+  takeFrame: () => Promise<Frame>; // base64 JPEG ~512 px, or "too dark" (not sent)
   check: (image: string) => Promise<{ status: number; data: FrameCheck | null }>;
-  onReady: (mode: Mode | null) => void;
-  onDetect: (d: Detection | null) => void; // null = nothing detected in this frame
+  onDetect: (d: Detection | null, appeared: boolean) => void; // null = nothing detected
   onHint: (hint: string) => void;
   onUnavailable: () => void;
   onDebug?: (d: AutoDebug) => void;
 };
-
-function asMode(v: unknown): Mode | null {
-  return typeof v === "string" && MODES.includes(v as Mode) ? (v as Mode) : null;
-}
 
 export function useAutoCapture(opts: Options) {
   const o = useRef(opts);
   o.current = opts;
   const inFlight = useRef<Promise<void> | null>(null);
   const grabbing = useRef<Promise<void> | null>(null);
+  const logic = useRef<AutoState>(initialAutoState);
   const st = useRef({
     steadySince: 0,
     lastCheck: 0,
-    backoffUntil: 0,
-    readKey: null as string | null, // last key read automatically or by tapping the card
-    misses: 0, // checks in a row where readKey wasn't seen
-    readyKey: null as string | null, // key of the previous check if it was ready
-    detectKey: null as string | null, // key of the previous check if something was detected
-    hint: null as { text: string; since: number } | null,
-    lastHintAt: 0,
+    waitUntil: 0,
     rotBuf: [] as number[],
     accBuf: [] as number[],
   }).current;
@@ -79,6 +69,7 @@ export function useAutoCapture(opts: Options) {
     acc: 0,
     inFlight: false,
     checks: 0,
+    darkSkipped: 0,
     last: "none yet",
     lastMs: 0,
     lastAt: 0,
@@ -87,8 +78,6 @@ export function useAutoCapture(opts: Options) {
   useEffect(() => {
     if (!opts.enabled) return;
     st.steadySince = 0;
-    st.readyKey = null;
-    st.detectKey = null;
     let cancelled = false;
     let sub: { remove: () => void } | null = null;
 
@@ -129,7 +118,6 @@ export function useAutoCapture(opts: Options) {
 
     const run = async () => {
       const t0 = Date.now();
-      st.lastCheck = t0;
       dbg.inFlight = true;
       try {
         const grab = o.current.takeFrame();
@@ -137,11 +125,18 @@ export function useAutoCapture(opts: Options) {
           () => undefined,
           () => undefined,
         );
-        const image = await grab.finally(() => {
+        const frame = await grab.finally(() => {
           grabbing.current = null;
         });
-        if (!image || cancelled || !o.current.enabled) return;
-        const { status, data } = await o.current.check(image);
+        if (!frame || cancelled || !o.current.enabled) return;
+        if ("dark" in frame) {
+          // Nearly black frame: don't waste a server call, try again shortly.
+          dbg.darkSkipped++;
+          dbg.last = `skipped: too dark (luma ${frame.luma.toFixed(0)})`;
+          st.waitUntil = Date.now() + DARK_RETRY_MS;
+          return;
+        }
+        const { status, data } = await o.current.check(frame.image);
         dbg.checks++;
         dbg.lastMs = Date.now() - t0;
         dbg.lastAt = Date.now();
@@ -153,66 +148,26 @@ export function useAutoCapture(opts: Options) {
         }
         if (!data) {
           dbg.last = `HTTP ${status || "no response"}`;
-          st.backoffUntil = Date.now() + ERROR_BACKOFF_MS;
+          st.waitUntil = Date.now() + ERROR_BACKOFF_MS;
           return;
         }
-        const conf = typeof data.confidence === "number" ? data.confidence : null;
         dbg.last = [
           data.ready ? "ready" : "not ready",
           data.detected ? `detected "${data.label ?? ""}"` : "",
           data.key ? `key=${data.key}` : "",
-          conf !== null ? `conf=${conf.toFixed(2)}` : "",
+          typeof data.confidence === "number" ? `conf=${data.confidence.toFixed(2)}` : "",
           data.suggestedMode ? `mode=${data.suggestedMode}` : "",
           data.hint ? `hint="${data.hint}"` : "",
         ]
           .filter(Boolean)
           .join(" · ");
-
-        // Has the camera moved on from what was last read?
-        if (st.readKey && data.key !== st.readKey) {
-          st.misses++;
-          if (st.misses >= REARM_NOT_READY) st.readKey = null;
-        } else st.misses = 0;
-
-        const mode = asMode(data.suggestedMode);
-        // Suggestion card: the same thing detected in two frames in a row (a sweep across a room
-        // briefly "detects" things like an exit sign), and not just read.
-        const seenTwice = !!data.detected && !!data.key && data.key === st.detectKey;
-        st.detectKey = data.detected && data.key ? data.key : null;
-        if (seenTwice && data.key && data.key !== st.readKey) {
-          o.current.onDetect({ key: data.key, label: data.label?.trim() || "Something to read", mode, confidence: conf });
-        } else {
-          o.current.onDetect(null);
-        }
-
-        // Auto-read: ready on two checks in a row with the same key, confident, not read yet.
-        const confident = conf === null ? false : conf >= AUTO_CONFIDENCE;
-        if (data.ready && data.key) {
-          const twice = st.readyKey === data.key;
-          st.readyKey = data.key;
-          if (twice && confident && data.key !== st.readKey) {
-            st.readKey = data.key;
-            st.misses = 0;
-            st.readyKey = null;
-            st.hint = null;
-            o.current.onReady(mode);
-            return;
-          }
-        } else {
-          st.readyKey = null;
-        }
-
-        // Hints: only when the same one repeats for a while, and not too often.
-        const t = Date.now();
-        if (data.ready || data.detected || !data.hint) st.hint = null;
-        else if (st.hint?.text !== data.hint) st.hint = { text: data.hint, since: t };
-        else if (t - st.hint.since >= HINT_REPEAT_MS && t - st.lastHintAt >= HINT_GAP_MS) {
-          st.lastHintAt = t;
-          o.current.onHint(data.hint);
-        }
+        const out = reduceFrame(logic.current, data, Date.now());
+        logic.current = out.state;
+        o.current.onDetect(out.card, out.appeared);
+        if (out.speakHint) o.current.onHint(out.speakHint);
       } catch (e) {
         dbg.last = `error: ${e instanceof Error ? e.message : String(e)}`.slice(0, 120);
-        st.backoffUntil = Date.now() + ERROR_BACKOFF_MS;
+        st.waitUntil = Date.now() + ERROR_BACKOFF_MS;
       } finally {
         dbg.inFlight = false;
         st.lastCheck = Date.now(); // the gap counts from when this check finished
@@ -226,14 +181,8 @@ export function useAutoCapture(opts: Options) {
       dbg.steadyMs = motion && st.steadySince ? now - st.steadySince : 0;
       o.current.onDebug?.({ ...dbg });
       if (inFlight.current || cancelled) return;
-      if (now < st.backoffUntil || now - st.lastCheck < MIN_GAP_MS) return;
-      // With motion data, wait for a steady hold; without it, check on a timer.
-      if (motion && !st.steadySince) {
-        st.detectKey = null; // moving: a fresh pair of frames is needed again
-        st.readyKey = null;
-        return;
-      }
-      if (motion ? now - st.steadySince < STEADY_MS : now - st.lastCheck < NO_MOTION_GAP_MS) return;
+      if (now < st.waitUntil || now - st.lastCheck < MIN_GAP_MS) return;
+      if (motion ? !st.steadySince || now - st.steadySince < STEADY_MS : now - st.lastCheck < NO_MOTION_GAP_MS) return;
       const p = run().finally(() => {
         inFlight.current = null;
       });
@@ -244,18 +193,16 @@ export function useAutoCapture(opts: Options) {
       cancelled = true;
       clearInterval(timer);
       sub?.remove();
-      o.current.onDetect(null);
+      o.current.onDetect(null, false);
     };
   }, [opts.enabled, st, dbg]);
 
   return {
     /** Resolves once no frame grab is using the camera, so a manual capture never collides. */
     idle: () => grabbing.current ?? Promise.resolve(),
-    /** The user tapped the card for this key: don't auto-read it again right after. */
+    /** The user tapped the card (or Capture) for this item: don't offer it again right away. */
     markRead: (key: string) => {
-      st.readKey = key;
-      st.misses = 0;
-      st.readyKey = null;
+      logic.current = markReadState(logic.current, key);
     },
   };
 }

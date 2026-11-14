@@ -54,6 +54,7 @@ import { DetectionCard } from "./src/components/DetectionCard";
 import { HatView } from "./src/components/HatView";
 import { useAutoCapture, type AutoDebug, type Detection } from "./src/useAutoCapture";
 import { useHatCamera } from "./src/useHatCamera";
+import { averageLuma, isTooDark } from "./src/logic/brightness";
 import {
   HISTORY_QUESTION,
   initialCommandState,
@@ -69,10 +70,10 @@ const MAX_SIDE = 1024;
 const JPEG_QUALITY = 0.6;
 const FRAME_SIDE = 512;
 const MAX_RECORD_MS = 12_000;
-const QUIET_BEFORE_AUTO_MS = 600; // speech must have been stopped this long before an auto read
+const CAMERA_SETTLE_MS = 1200; // let auto-exposure settle after the camera (re)starts
 const demo = demoState(); // web screenshots only; null on iOS
 
-// One resize + one JPEG encode. The camera already delivers a reduced-size frame (see pictureSize).
+// One resize + one JPEG encode.
 async function toJpeg(uri: string, width: number, height: number, maxSide = MAX_SIDE, compress = JPEG_QUALITY): Promise<Photo> {
   const ctx = ImageManipulator.manipulate(uri);
   if (Math.max(width, height) > maxSide) ctx.resize(width >= height ? { width: maxSide } : { height: maxSide });
@@ -82,11 +83,30 @@ async function toJpeg(uri: string, width: number, height: number, maxSide = MAX_
   return { uri: out.uri, base64: out.base64, width: out.width, height: out.height };
 }
 
-// Smallest camera preset that still gives at least MAX_SIDE px on the short crop: capturing a
-// 12 MP photo only to shrink it costs encode time on every shot.
-function pickPictureSize(sizes: string[]): string | undefined {
-  for (const want of ["1920x1080", "High", "3840x2160"]) if (sizes.includes(want)) return want;
-  return undefined;
+// Auto-mode frame: 512 px JPEG for the server plus a 16 px PNG to measure brightness locally.
+async function toFrame(uri: string, width: number, height: number): Promise<{ image: string } | { dark: true; luma: number }> {
+  const ctx = ImageManipulator.manipulate(uri);
+  if (Math.max(width, height) > FRAME_SIDE) ctx.resize(width >= height ? { width: FRAME_SIDE } : { height: FRAME_SIDE });
+  const img = await ctx.renderAsync();
+  const out = await img.saveAsync({ format: SaveFormat.JPEG, compress: 0.5, base64: true });
+  if (!out.base64) throw new Error("no image data");
+  try {
+    const tiny = await ImageManipulator.manipulate(img).resize({ width: 16 }).renderAsync();
+    const png = await tiny.saveAsync({ format: SaveFormat.PNG, base64: true });
+    const luma = png.base64 ? averageLuma(png.base64) : NaN;
+    if (isTooDark(luma)) return { dark: true, luma };
+  } catch {
+    // Can't measure: send it anyway.
+  }
+  return { image: out.base64 };
+}
+
+// One camera operation at a time: auto frames and manual captures never overlap.
+let cameraQueue: Promise<unknown> = Promise.resolve();
+function withCamera<T>(fn: () => Promise<T>): Promise<T> {
+  const run = cameraQueue.then(fn, fn);
+  cameraQueue = run.catch(() => undefined);
+  return run;
 }
 
 const haptic = {
@@ -124,7 +144,7 @@ function Main() {
   const [reduceMotion, setReduceMotion] = useState(false);
   const [screenReader, setScreenReader] = useState(false);
   const [appActive, setAppActive] = useState(AppState.currentState === "active");
-  const [pictureSize, setPictureSize] = useState<string | undefined>();
+  const cameraStartedAt = useRef(0);
   const [cameraReady, setCameraReady] = useState(false);
   const [hint, setHint] = useState<string | null>(demo?.hint ?? null);
   const [detection, setDetection] = useState<Detection | null>(demo?.detection ?? null);
@@ -367,23 +387,22 @@ function Main() {
 
   const auto = useAutoCapture({
     enabled: autoEnabled,
-    takeFrame: async () => {
-      const pic = await camera.current?.takePictureAsync({ quality: 0.4, shutterSound: false });
-      if (!pic) return null;
-      const small = await toJpeg(pic.uri, pic.width, pic.height, FRAME_SIDE, 0.5);
-      return small.base64;
-    },
+    // Same capture settings as Capture (which gives good photos), minus the shutter sound, then
+    // shrunk to 512 px. Never while the camera is (re)starting, never overlapping another capture.
+    takeFrame: () =>
+      withCamera(async () => {
+        if (!cameraStartedAt.current || Date.now() - cameraStartedAt.current < CAMERA_SETTLE_MS) return null;
+        if (busyRef.current || sheetRef.current !== "none") return null;
+        const pic = await camera.current?.takePictureAsync({ quality: 0.7, shutterSound: false });
+        if (!pic) return null;
+        return toFrame(pic.uri, pic.width, pic.height);
+      }),
     check: (image) => {
       const { settings: s } = live.current;
       return frameCheck({ image, mode: s.mode, ...(s.mode === "translate" ? { language: s.language } : {}) });
     },
-    onReady: (mode) => {
-      // Never start over speech that's still winding down from a previous result.
-      if (busyRef.current || sheetRef.current !== "none" || Date.now() - quietSince.current < QUIET_BEFORE_AUTO_MS) return;
-      showDetection(null, true);
-      void start(capturePhoto(false), { auto: true, mode: mode ?? undefined });
-    },
-    onDetect: (d) => showDetection(d),
+    // Auto never reads by itself: it only offers the card. Reading starts when the user taps it.
+    onDetect: (d, appeared) => showDetection(d, false, 2000, appeared),
     onDebug: showDebug ? setDebug : undefined,
     onHint: (text) => {
       if (busyRef.current || sheetRef.current !== "none") return; // never over a result
@@ -402,7 +421,7 @@ function Main() {
 
   // Suggestion card. Appears (with a light haptic and a VoiceOver announcement, never TTS) when
   // frame-check detects something; stays while it's detected; fades about 2 s after it's gone.
-  function showDetection(d: Detection | null, now = false, hideAfterMs = 2000) {
+  function showDetection(d: Detection | null, now = false, hideAfterMs = 2000, appeared?: boolean) {
     if (!d) {
       if (now) {
         if (detectionHide.current) clearTimeout(detectionHide.current);
@@ -423,7 +442,7 @@ function Main() {
     const prev = detectionRef.current;
     detectionRef.current = d;
     setDetection(d);
-    if (prev && prev.key === d.key && prev.label === d.label) return;
+    if (appeared === false || (appeared === undefined && prev && prev.key === d.key)) return;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     // Point the mode chips at the suggestion so a manual Capture uses it too.
     if (d.mode && d.mode !== live.current.settings.mode && !live.current.settings.hatConnected) {
@@ -603,8 +622,7 @@ function Main() {
   // the haptic tick instead.
   function capturePhoto(shutter: boolean) {
     return async () => {
-      await auto.idle(); // wait for any auto frame grab still using the camera
-      const pic = await camera.current?.takePictureAsync({ quality: 0.7, shutterSound: shutter });
+      const pic = await withCamera(() => camera.current!.takePictureAsync({ quality: 0.7, shutterSound: shutter }));
       if (!pic) throw new Error("camera not ready");
       return toJpeg(pic.uri, pic.width, pic.height);
     };
@@ -612,16 +630,17 @@ function Main() {
 
   const capture = () => start(capturePhoto(true));
 
-  const onCameraReady = async () => {
+  // The preview stops while a sheet is open; give exposure time to settle after it restarts.
+  const cameraLive = sheet === "none" && appActive && !hat;
+  useEffect(() => {
+    cameraStartedAt.current = cameraLive && cameraReady ? Date.now() : 0;
+  }, [cameraLive, cameraReady]);
+
+  // The default "photo" preset on purpose: a video preset (1920x1080) captured faster but is
+  // the prime suspect for the dark auto frames, and manual Capture photos were fine without it.
+  const onCameraReady = () => {
     setCameraReady(true);
-    if (pictureSize) return;
-    try {
-      const sizes = (await camera.current?.getAvailablePictureSizesAsync()) ?? [];
-      const pick = pickPictureSize(sizes);
-      if (pick) setPictureSize(pick);
-    } catch {
-      // Keep the default preset.
-    }
+    cameraStartedAt.current = Date.now();
   };
 
   const pickPhoto = () =>
@@ -894,8 +913,9 @@ function Main() {
             style={StyleSheet.absoluteFill}
             facing="back"
             active={sheet === "none" && appActive}
-            pictureSize={pictureSize}
-            onCameraReady={() => void onCameraReady()}
+            animateShutter={false}
+            flash="off"
+            onCameraReady={onCameraReady}
           />
         ) : (
           <View style={[StyleSheet.absoluteFill, s.permission, { paddingTop: insets.top + 96 }]}>
@@ -983,7 +1003,7 @@ function Main() {
               `auto: ${autoEnabled ? "running" : `paused (${pausedReasons.join(", ") || "?"})`}`,
               `motion: ${debug?.motion ?? "-"}  steady: ${debug ? (debug.steady ? `yes ${debug.steadyMs}ms` : "no") : "-"}`,
               `rot ${debug?.rot.toFixed(1) ?? "-"} deg/s  acc ${debug?.acc.toFixed(2) ?? "-"} m/s2`,
-              `checks: ${debug?.checks ?? 0}${debug?.inFlight ? " (in flight)" : ""}  last: ${debug?.lastMs ?? 0}ms${
+              `checks: ${debug?.checks ?? 0}${debug?.inFlight ? " (in flight)" : ""}  dark skipped: ${debug?.darkSkipped ?? 0}  last: ${debug?.lastMs ?? 0}ms${
                 debug?.lastAt ? `, ${Math.round((Date.now() - debug.lastAt) / 1000)}s ago` : ""
               }`,
               `result: ${debug?.last ?? "-"}`,
