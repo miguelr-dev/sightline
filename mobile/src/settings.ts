@@ -13,6 +13,9 @@ export type Settings = {
   autoCapture: boolean; // read automatically when the phone is held steady on something readable
   autoOffByServer: boolean; // Auto was switched off because the server lacked /api/frame-check
   voiceId: string; // "" = the server's default voice
+  hatDeviceId: string; // hat camera hardware id
+  hatPairCode: string;
+  hatConnected: boolean; // listening to the hat camera instead of using the phone camera
   deviceId: string; // random, made once; sent as x-sightline-device so the server can keep history
 };
 
@@ -28,6 +31,9 @@ export const DEFAULT_SETTINGS: Settings = {
   autoCapture: true,
   autoOffByServer: false,
   voiceId: "",
+  hatDeviceId: "",
+  hatPairCode: "",
+  hatConnected: false,
   deviceId: "",
 };
 

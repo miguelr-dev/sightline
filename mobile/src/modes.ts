@@ -120,3 +120,11 @@ export type Scan = {
   lookup: LookupResponse | null;
   image?: string;
 };
+
+// GET /api/device/next: events from the hat camera, oldest first.
+export type DeviceEvent = {
+  id: string;
+  createdAt: string;
+  kind: "detected" | "answer" | "hint";
+  payload: Record<string, unknown>;
+};

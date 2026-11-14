@@ -64,6 +64,7 @@ type Demo = {
   hint: string | null;
   scans: Scan[] | null;
   detection: { key: string; label: string; mode: Mode | null; confidence: number | null } | null;
+  hat: boolean;
 };
 
 const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
@@ -90,7 +91,9 @@ export function demoState(): Demo | null {
     photo,
     voices: VOICES,
     hint: null,
-    detection: q === "home" ? { key: "harbor-table-menu", label: "Harbor Table menu", mode: "menu", confidence: 0.92 } : null,
+    detection:
+      q === "home" || q === "hat" ? { key: "harbor-table-menu", label: "Harbor Table menu", mode: "menu", confidence: 0.92 } : null,
+    hat: q === "hat",
     scans: [
       { id: "1", createdAt: ago(2), mode: "menu", itemKind: "restaurant", title: "Harbor Table lunch menu", spokenText: RESULT.spokenText, sections: RESULT.sections ?? [], lookup: LOOKUP(uri), image: uri },
       { id: "2", createdAt: ago(38), mode: "menu", itemKind: "medicine", title: "Ibuprofen 200 mg tablets", spokenText: "Ibuprofen 200 milligram tablets, 50 count.", sections: [], lookup: null },

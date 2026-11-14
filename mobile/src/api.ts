@@ -1,6 +1,6 @@
 import { fetch } from "expo/fetch";
 import { File, Paths, UploadType } from "expo-file-system";
-import type { AnalyzeResponse, Features, FrameCheck, ItemKind, LookupResponse, Mode, Scan, Voice } from "./modes";
+import type { AnalyzeResponse, DeviceEvent, Features, FrameCheck, ItemKind, LookupResponse, Mode, Scan, Voice } from "./modes";
 import { cleanSections, httpsUrl, MODES, UNKNOWN_FEATURES } from "./modes";
 
 // Every call goes to the SightLine Next.js server. No API keys live in the app.
@@ -307,4 +307,68 @@ export async function clearHistory(): Promise<boolean> {
 export async function frameCheckExists(): Promise<boolean> {
   const r = await postJson<unknown>("/api/frame-check", {}, 6000);
   return r.status > 0 && r.status !== 404 && r.status !== 405;
+}
+
+// Hat camera events newer than `after`. 404/503 = not set up on this server, 401/403 = bad pair
+// code, 400 = invalid device ID.
+export async function deviceNext(
+  hardwareId: string,
+  pairCode: string,
+  after: string,
+): Promise<{ status: number; events: DeviceEvent[] }> {
+  if (!baseUrl) return { status: 0, events: [] };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    // The pair code goes in the query (what the server reads) and the x-pair-code header.
+    const q = `device=${encodeURIComponent(hardwareId)}&pair=${encodeURIComponent(pairCode)}${
+      after ? `&after=${encodeURIComponent(after)}` : ""
+    }`;
+    const res = await fetch(`${baseUrl}/api/device/next?${q}`, {
+      headers: { ...baseHeaders(), "x-pair-code": pairCode },
+      signal: controller.signal,
+    });
+    if (!res.ok) return { status: res.status, events: [] };
+    const data = (await res.json()) as { events?: unknown };
+    const events = Array.isArray(data.events)
+      ? data.events
+          .filter((e): e is Record<string, unknown> => !!e && typeof e === "object")
+          .filter((e) => (typeof e.id === "string" || typeof e.id === "number") && typeof e.kind === "string")
+          .filter((e) => e.kind === "detected" || e.kind === "answer" || e.kind === "hint")
+          .map((e) => ({
+            id: String(e.id),
+            createdAt: typeof e.createdAt === "string" ? e.createdAt : "",
+            kind: e.kind as DeviceEvent["kind"],
+            payload: e.payload && typeof e.payload === "object" ? (e.payload as Record<string, unknown>) : {},
+          }))
+      : [];
+    return { status: res.status, events };
+  } catch {
+    return { status: 0, events: [] };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Parse an "answer" event payload (an AnalyzeResponse plus scanId and maybe lookup data). */
+export function parseDeviceAnswer(p: Record<string, unknown>): {
+  answer: AnalyzeResponse | null;
+  lookup: LookupResponse | null;
+  image?: string;
+  scanId?: string;
+} {
+  const scanId = typeof p.scanId === "string" || typeof p.scanId === "number" ? String(p.scanId) : undefined;
+  const spoken = typeof p.spokenText === "string" ? p.spokenText.trim() : "";
+  const answer: AnalyzeResponse | null = spoken
+    ? {
+        spokenText: spoken,
+        details: typeof p.details === "string" ? p.details : "",
+        sections: cleanSections(p.sections),
+        itemKind: typeof p.itemKind === "string" ? (p.itemKind as ItemKind) : undefined,
+        webQuery: typeof p.webQuery === "string" ? p.webQuery : undefined,
+        scanId,
+        error: p.error === true,
+      }
+    : null;
+  return { answer, lookup: parseLookup(p.lookup), image: httpsUrl(p.image), scanId };
 }

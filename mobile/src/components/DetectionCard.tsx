@@ -14,7 +14,7 @@ export function DetectionCard({
 }: {
   detection: Detection | null;
   reduceMotion: boolean;
-  onPress: () => void;
+  onPress?: () => void; // without it the card is informational (hat camera mode)
 }) {
   const [shown, setShown] = useState<Detection | null>(detection);
   const anim = useRef(new Animated.Value(detection ? 1 : 0)).current;
@@ -49,10 +49,11 @@ export function DetectionCard({
     >
       <Pressable
         onPress={onPress}
-        disabled={!detection}
-        accessibilityRole="button"
+        disabled={!detection || !onPress}
+        accessible
+        accessibilityRole={onPress ? "button" : "text"}
         accessibilityLabel={`${spoken}${mode ? `, ${mode}` : ""}`}
-        accessibilityHint="Reads it now"
+        accessibilityHint={onPress ? "Reads it now" : undefined}
         style={({ pressed }) => [s.card, pressed && { opacity: 0.85 }]}
       >
         <View style={s.badge}>
@@ -63,10 +64,11 @@ export function DetectionCard({
             {title}
           </Text>
           <Text style={[type.subhead, { color: "#D1D1D6" }]}>
-            Tap to read{mode ? ` · ${mode}` : ""}
+            {onPress ? "Tap to read" : "Your hat camera sees this"}
+            {mode ? ` · ${mode}` : ""}
           </Text>
         </View>
-        <Icon sf="arrow.right.circle.fill" ion="arrow-forward-circle" size={30} color={colors.onPrimary} />
+        {onPress ? <Icon sf="arrow.right.circle.fill" ion="arrow-forward-circle" size={30} color={colors.onPrimary} /> : null}
       </Pressable>
     </Animated.View>
   );

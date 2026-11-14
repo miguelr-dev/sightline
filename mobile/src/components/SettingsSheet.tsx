@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LANGUAGES, type Features, type Voice } from "../modes";
 import { ENV_API_URL, normalizeUrl, RATES, type Settings } from "../settings";
 import { colors, MIN_TARGET, radius, type } from "../theme";
+import type { HatStatus } from "../useHatCamera";
 import { Segmented } from "./Segmented";
 import { Icon, PillButton } from "./ui";
 
@@ -65,6 +66,9 @@ export function SettingsSheet({
   speaking,
   historyOn,
   onClearHistory,
+  hatStatus,
+  onConnectHat,
+  onDisconnectHat,
   onPreviewVoice,
   onStopPreview,
   reduceMotion,
@@ -79,6 +83,9 @@ export function SettingsSheet({
   speaking: boolean;
   historyOn: boolean;
   onClearHistory: () => void;
+  hatStatus: HatStatus | null; // null = not connected
+  onConnectHat: (deviceId: string, pairCode: string) => void;
+  onDisconnectHat: () => void;
   onPreviewVoice: (v: Voice | null) => void;
   onStopPreview: () => void;
   reduceMotion: boolean;
@@ -88,6 +95,13 @@ export function SettingsSheet({
 }) {
   const insets = useSafeAreaInsets();
   const [url, setUrl] = useState(settings.apiUrl);
+  const [hatId, setHatId] = useState(settings.hatDeviceId);
+  const [hatCode, setHatCode] = useState(settings.hatPairCode);
+  useEffect(() => {
+    setHatId(settings.hatDeviceId);
+    setHatCode(settings.hatPairCode);
+  }, [settings.hatDeviceId, settings.hatPairCode, visible]);
+  const hatOn = hatStatus !== null;
   useEffect(() => setUrl(settings.apiUrl), [settings.apiUrl, visible]);
 
   const commitUrl = () => {
@@ -118,6 +132,71 @@ export function SettingsSheet({
                 />
               </Row>
             </View>
+          </View>
+
+          <View style={s.group}>
+            <Text style={[type.caption, s.groupLabel]}>Hat camera</Text>
+            <View style={[s.card, { padding: 16, gap: 12 }]}>
+              <TextInput
+                value={hatId}
+                onChangeText={setHatId}
+                onEndEditing={() => onChange({ hatDeviceId: hatId.trim() })}
+                placeholder="Device ID"
+                placeholderTextColor={colors.secondary}
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!hatOn}
+                style={[type.body, s.field]}
+                accessibilityLabel="Hat camera device ID"
+              />
+              <TextInput
+                value={hatCode}
+                onChangeText={setHatCode}
+                onEndEditing={() => onChange({ hatPairCode: hatCode.trim() })}
+                placeholder="Pair code"
+                placeholderTextColor={colors.secondary}
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!hatOn}
+                style={[type.body, s.field]}
+                accessibilityLabel="Hat camera pair code"
+              />
+              {hatOn ? (
+                <>
+                  <View style={s.status} accessibilityLiveRegion="polite">
+                    <Icon
+                      sf={hatStatus === "live" ? "checkmark.circle.fill" : "exclamationmark.circle"}
+                      ion={hatStatus === "live" ? "checkmark-circle" : "alert-circle-outline"}
+                      size={20}
+                    />
+                    <Text style={[type.subhead, { flex: 1, color: colors.label }]}>
+                      {hatStatus === "live"
+                        ? "Connected. The phone speaks what the hat sees."
+                        : hatStatus === "missing"
+                          ? "This server doesn't support the hat camera yet."
+                          : hatStatus === "unauthorized"
+                            ? "The pair code was rejected."
+                            : hatStatus === "invalid"
+                              ? "That device ID isn't valid (letters, numbers and dashes)."
+                              : hatStatus === "offline"
+                              ? "Can't reach the server."
+                              : "Connecting…"}
+                    </Text>
+                  </View>
+                  <PillButton label="Disconnect" variant="secondary" onPress={onDisconnectHat} />
+                </>
+              ) : (
+                <PillButton
+                  label="Connect"
+                  disabled={!hatId.trim()}
+                  onPress={() => onConnectHat(hatId.trim(), hatCode.trim())}
+                  accessibilityHint="Turns off the phone camera and speaks what the hat camera sees"
+                />
+              )}
+            </View>
+            <Text style={[type.footnote, s.groupLabel]}>
+              A camera on a cap sends photos to the server; this phone reads the answers aloud. Keep SightLine open.
+            </Text>
           </View>
 
           <View style={s.group}>

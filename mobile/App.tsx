@@ -22,6 +22,7 @@ import {
   getHistory,
   getVoices,
   lookup,
+  parseDeviceAnswer,
   setBaseUrl,
   setDeviceId,
   transcribe,
@@ -32,13 +33,25 @@ import { ResultSheet } from "./src/components/ResultSheet";
 import { LanguageSheet, SettingsSheet, type Connection } from "./src/components/SettingsSheet";
 import { Icon, IconButton, PillButton } from "./src/components/ui";
 import { demoState } from "./src/demo";
-import { languageCode, MODE_HINTS, MODE_LABELS, UNKNOWN_FEATURES, type Mode, type Scan, type Voice } from "./src/modes";
+import {
+  languageCode,
+  MODE_HINTS,
+  MODE_LABELS,
+  MODES,
+  UNKNOWN_FEATURES,
+  type DeviceEvent,
+  type Mode,
+  type Scan,
+  type Voice,
+} from "./src/modes";
 import { effectiveApiUrl, loadSettings, saveSettings, type Settings } from "./src/settings";
 import { speech } from "./src/speech";
 import { colors, radius, type } from "./src/theme";
 import type { Photo, Shot } from "./src/types";
 import { DetectionCard } from "./src/components/DetectionCard";
+import { HatView } from "./src/components/HatView";
 import { useAutoCapture, type AutoDebug, type Detection } from "./src/useAutoCapture";
+import { useHatCamera } from "./src/useHatCamera";
 
 // 1024 px at quality 0.6: in tests against the demo images this read exactly the same text as
 // 0.7, and the upload is about 17% smaller. 896 px saved little more and risks small print.
@@ -114,6 +127,7 @@ function Main() {
   // lookups) captures it when it starts and stays silent if it changed in the meantime.
   const speakToken = useRef(0);
   const quietSince = useRef(Date.now());
+  const speakingRef = useRef(false);
   const live = useRef({ settings, screenReader, connection });
   live.current = { settings, screenReader, connection };
   shotRef.current = shot;
@@ -125,6 +139,7 @@ function Main() {
   useEffect(() => {
     void speech.init();
     const unsub = speech.subscribe((v) => {
+      speakingRef.current = v;
       setSpeaking(v);
       if (!v) quietSince.current = Date.now();
     });
@@ -318,8 +333,10 @@ function Main() {
   );
 
   // ---- auto-capture ------------------------------------------------------------------------------
+  const hat = demo ? demo.hat : !!(settings.hatConnected && settings.hatDeviceId.trim());
   const autoEnabled =
     !demo &&
+    !hat &&
     Platform.OS !== "web" &&
     settings.autoCapture &&
     appActive &&
@@ -367,7 +384,7 @@ function Main() {
 
   // Suggestion card. Appears (with a light haptic and a VoiceOver announcement, never TTS) when
   // frame-check detects something; stays while it's detected; fades about 2 s after it's gone.
-  function showDetection(d: Detection | null, now = false) {
+  function showDetection(d: Detection | null, now = false, hideAfterMs = 2000) {
     if (!d) {
       if (now) {
         if (detectionHide.current) clearTimeout(detectionHide.current);
@@ -379,7 +396,7 @@ function Main() {
           detectionHide.current = null;
           detectionRef.current = null;
           setDetection(null);
-        }, 2000);
+        }, hideAfterMs);
       }
       return;
     }
@@ -391,7 +408,9 @@ function Main() {
     if (prev && prev.key === d.key && prev.label === d.label) return;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     // Point the mode chips at the suggestion so a manual Capture uses it too.
-    if (d.mode && d.mode !== live.current.settings.mode) setSettings((x) => ({ ...x, mode: d.mode! }));
+    if (d.mode && d.mode !== live.current.settings.mode && !live.current.settings.hatConnected) {
+      setSettings((x) => ({ ...x, mode: d.mode! }));
+    }
     if (live.current.screenReader) AccessibilityInfo.announceForAccessibility(`${d.label} detected. Double-tap the card to read.`);
   }
 
@@ -401,6 +420,106 @@ function Main() {
     auto.markRead(d.key);
     showDetection(null, true);
     void start(capturePhoto(true), { mode: d.mode ?? undefined });
+  };
+
+  // ---- hat camera ---------------------------------------------------------------------------------
+  // The phone is the speaker for a camera on a cap: it polls the server for what the hat saw.
+  const hatHint = useRef({ text: "", since: 0, lastSpoken: 0 });
+  const hatHintClear = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hatShotToken = useRef<{ shotId: number; token: number } | null>(null);
+
+  const onHatEvent = (e: DeviceEvent) => {
+    const p = e.payload;
+    if (e.kind === "detected") {
+      const label = typeof p.label === "string" && p.label.trim() ? p.label.trim() : "";
+      if (!label) return;
+      const key = typeof p.key === "string" && p.key ? p.key : label;
+      const mode = MODES.includes(p.suggestedMode as Mode) ? (p.suggestedMode as Mode) : null;
+      const confidence = typeof p.confidence === "number" ? p.confidence : null;
+      if (sheetRef.current !== "none") return;
+      showDetection({ key, label, mode, confidence });
+      showDetection(null, false, 4000); // fades 4 s after the last sighting
+      return;
+    }
+    if (e.kind === "hint") {
+      const text =
+        typeof p.hint === "string" ? p.hint.trim() : typeof p.text === "string" ? p.text.trim() : "";
+      if (!text) return;
+      setHint(text); // always shown quietly
+      if (hatHintClear.current) clearTimeout(hatHintClear.current);
+      hatHintClear.current = setTimeout(() => setHint(null), 4000);
+      const h = hatHint.current;
+      const t = Date.now();
+      if (h.text !== text) {
+        hatHint.current = { text, since: t, lastSpoken: h.lastSpoken };
+        return;
+      }
+      // Same hint for 3 s, at most every 5 s, never over a result or other speech.
+      if (t - h.since >= 3000 && t - h.lastSpoken >= 5000 && sheetRef.current === "none" && !speech.owner && !speakingRef.current) {
+        h.lastSpoken = t;
+        const { settings: st, screenReader: sr } = live.current;
+        if (st.autoSpeak) speech.hint(text);
+        else if (sr) AccessibilityInfo.announceForAccessibility(text);
+      }
+      return;
+    }
+    // answer
+    const { answer, lookup: web, image, scanId } = parseDeviceAnswer(p);
+    const cur = shotRef.current;
+    const sameScan = !!scanId && cur?.result?.scanId === scanId;
+    if (sameScan || (!answer && web)) {
+      // Lookup data arriving for the answer already on screen: add the web card, then speak it
+      // after the answer, unless that result was dismissed meanwhile.
+      if (!cur || !web || cur.web.status === "done") return;
+      if (scanId && cur.result?.scanId && cur.result.scanId !== scanId) return;
+      patchShot(cur.id, (x) => ({ ...x, web: { status: "done", data: web } }));
+      const tok = hatShotToken.current;
+      if (tok && tok.shotId === cur.id && tok.token === speakToken.current && !web.error) {
+        say(web.spokenText, "en-US", { queue: true, token: tok.token });
+      }
+      return;
+    }
+    if (!answer) return;
+    silence(); // a new answer replaces whatever was being said
+    const token = speakToken.current;
+    const mode = MODES.includes(p.mode as Mode) ? (p.mode as Mode) : live.current.settings.mode;
+    const next: Shot = {
+      id: nextId.current++,
+      photo: image ? { uri: image, base64: "", width: 4, height: 3 } : null,
+      mode,
+      language: live.current.settings.language,
+      result: answer,
+      followUps: [],
+      web: web ? { status: "done", data: web } : { status: "idle" },
+      fromHistory: true, // no photo data on the phone: no follow-ups or retry
+    };
+    setShot(next);
+    shotRef.current = next;
+    hatShotToken.current = { shotId: next.id, token };
+    showDetection(null, true);
+    setHint(null);
+    sheetRef.current = "result";
+    setSheetState("result");
+    if (answer.error) haptic.error();
+    else haptic.success();
+    say(answer.spokenText, mode === "translate" ? languageCode(next.language) : "en-US", { token });
+    if (web && !web.error) say(web.spokenText, "en-US", { queue: true, token });
+  };
+
+  const hatCam = useHatCamera({
+    enabled: hat && !demo,
+    hardwareId: settings.hatDeviceId.trim(),
+    pairCode: settings.hatPairCode.trim(),
+    onEvent: onHatEvent,
+  });
+
+  const disconnectHat = () => {
+    haptic.tick();
+    silence();
+    showDetection(null, true);
+    setHint(null);
+    update({ hatConnected: false });
+    if (live.current.screenReader) AccessibilityInfo.announceForAccessibility("Hat camera disconnected");
   };
 
   const pausedReasons = [
@@ -615,9 +734,26 @@ function Main() {
 
   return (
     <View style={s.root}>
-      <StatusBar style="light" />
+      <StatusBar style={hat ? "dark" : "light"} />
+
+      {hat ? (
+        <HatView
+          deviceId={demo ? "cap-01" : settings.hatDeviceId.trim()}
+          status={demo ? "live" : hatCam.status}
+          lastEventAt={demo ? Date.now() - 3000 : hatCam.lastEventAt}
+          detection={sheet === "none" ? detection : null}
+          hint={hint}
+          last={last}
+          reduceMotion={reduceMotion}
+          topInset={insets.top}
+          bottomInset={insets.bottom}
+          onOpenLast={() => setSheet("result")}
+          onDisconnect={disconnectHat}
+        />
+      ) : null}
 
       {/* Viewfinder: the hero. The whole area is also a capture target. */}
+      {!hat ? (
       <View style={StyleSheet.absoluteFill}>
         {demo ? (
           <Image source={demo.photo} style={StyleSheet.absoluteFill} contentFit="cover" />
@@ -646,7 +782,8 @@ function Main() {
           </View>
         )}
       </View>
-      {camGranted ? (
+      ) : null}
+      {camGranted && !hat ? (
         <Pressable
           style={StyleSheet.absoluteFill}
           onPress={capture}
@@ -659,12 +796,13 @@ function Main() {
 
       {/* Top bar */}
       <View style={[s.top, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
-        <View style={s.wordmark} accessibilityRole="header">
+        <View style={[s.wordmark, hat && { backgroundColor: colors.surface }]} accessibilityRole="header">
           <Text style={[type.headline, { fontWeight: "700" }]} maxFontSizeMultiplier={1.6} numberOfLines={1}>
             SightLine
           </Text>
         </View>
         <View style={s.topRight}>
+          {!hat ? (
           <Pressable
             onPress={toggleAuto}
             onLongPress={() => {
@@ -696,12 +834,13 @@ function Main() {
               {settings.autoCapture ? "Auto on" : "Auto off"}
             </Text>
           </Pressable>
+          ) : null}
           {historyOn ? (
-            <IconButton onPress={() => void openRecent()} label="Recent scans">
+            <IconButton onPress={() => void openRecent()} label="Recent scans" filled={hat ? "surface" : "white"}>
               <Icon sf="clock.arrow.circlepath" ion="time-outline" />
             </IconButton>
           ) : null}
-          <IconButton onPress={() => setSheet("settings")} label="Settings">
+          <IconButton onPress={() => setSheet("settings")} label="Settings" filled={hat ? "surface" : "white"}>
             <Icon sf="gearshape" ion="settings-outline" />
           </IconButton>
         </View>
@@ -722,13 +861,13 @@ function Main() {
           </Text>
         </View>
       ) : null}
-      {hint && !detection && (connection.state !== "down" || demo) ? (
+      {hint && !detection && !hat && (connection.state !== "down" || demo) ? (
         <View style={[s.banner, { top: insets.top + 64 }]} accessible accessibilityLabel={hint}>
           <Icon sf="viewfinder" ion="scan-outline" size={18} />
           <Text style={[type.subhead, { color: colors.label, fontWeight: "600", flexShrink: 1 }]}>{hint}</Text>
         </View>
       ) : null}
-      {connection.state === "down" && !demo ? (
+      {connection.state === "down" && !demo && !hat ? (
         <Pressable
           onPress={() => setSheet("settings")}
           accessibilityRole="button"
@@ -743,6 +882,7 @@ function Main() {
       ) : null}
 
       {/* Bottom sheet: modes and the capture button */}
+      {!hat ? (
       <View style={[s.sheet, { paddingBottom: insets.bottom + 12 }]}>
         <ModeGrid mode={mode} onChange={changeMode} />
         <Text style={type.subhead}>{MODE_HINTS[mode]}</Text>
@@ -795,6 +935,7 @@ function Main() {
           />
         </View>
       </View>
+      ) : null}
 
       <ResultSheet
         visible={sheet === "result"}
@@ -832,6 +973,14 @@ function Main() {
         speaking={speaking}
         historyOn={historyOn}
         onClearHistory={confirmClearHistory}
+        hatStatus={hat ? hatCam.status : null}
+        onConnectHat={(deviceId, pairCode) => {
+          haptic.success();
+          update({ hatDeviceId: deviceId, hatPairCode: pairCode, hatConnected: true });
+          setSheet("none");
+          if (live.current.screenReader) AccessibilityInfo.announceForAccessibility("Listening to your hat camera");
+        }}
+        onDisconnectHat={disconnectHat}
         onPreviewVoice={(v: Voice | null) => (v ? void speech.preview(v.id, v.previewUrl) : void speech.preview(""))}
         onStopPreview={() => speech.stop()}
         reduceMotion={reduceMotion}
