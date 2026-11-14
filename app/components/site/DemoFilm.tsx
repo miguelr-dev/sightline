@@ -44,29 +44,28 @@ const LABEL_LINES = ["Methylprednisolone tablets, 4 mg", "Sandoz · 21 tablets �
 function frameAt(t: number): Frame {
   const ci = chapterAt(t);
   const lt = t - CHAPTERS[ci].s;
-  const phone: PhoneState = { img: IMG.menuPortrait, mode: "translate", vfClass: lt < 1.8 ? "locking" : "", showLangRow: true };
+  const phone: PhoneState = { img: IMG.menuPortrait, mode: "auto", vfClass: lt < 1.8 ? "locking" : "", lang: "English" };
   const f: Frame = { phone, ci, caption: "", showCaption: true, showLang: false, question: "", showQuestion: false, lines: [], speaking: false, final: false };
-  // Tap Capture at 2s, then "Looking…" until 4s, as in the app.
-  const press = () => {
-    phone.capClass = lt >= 2 && lt < 2.35 ? "pressed" : "";
-    phone.ripple = lt >= 2 && lt < 2.9;
-    phone.looking = lt >= 2.35 && lt < 4;
+  // Tap the shutter at 2s, then "Reading…" until 4s, as in the app.
+  const shoot = () => {
+    phone.shutterPressed = lt >= 2 && lt < 2.35;
+    phone.status = lt >= 2.35 && lt < 4 ? "Reading…" : null;
   };
-  const translateTitle = "Translate · Spanish → English";
+  const translateTitle = "Translate to English";
 
   if (ci === 0) {
-    // Auto mode spots the menu, the user taps the card, the answer sheet slides up.
+    // Auto: the app spots the menu, the user taps the card, and the answer sheet slides up.
     f.showLang = true;
-    phone.detect = lt >= 1.4 && lt < 4.6;
-    phone.detectClass = lt >= 3 && lt < 3.3 ? "pressed" : "";
-    phone.looking = lt >= 3.3 && lt < 4.6;
+    if (lt >= 1.4 && lt < 3.3) phone.detect = { title: "Menú del día", sub: "Tap to read · Translate", pressed: lt >= 3 };
+    phone.status = lt >= 3.3 && lt < 4.6 ? "Reading…" : null;
     const n = Math.floor((lt - 5) * 3.2);
     f.caption = lt < 1.4 ? "" : lt < 4.6 ? "Menu detected. Tap to read." : words(MENU_LINE, n);
     f.speaking = n > 0 && n < 24;
-    if (lt >= 4.6) phone.sheet = { mode: translateTitle, img: IMG.menu, text: words(MENU_LINE, n), sections: ["First course", "Second course", "Dessert"], speaking: f.speaking };
+    if (lt >= 4.6) phone.sheet = { mode: "Auto · Translate", img: IMG.menu, text: words(MENU_LINE, n), sections: ["First course", "Second course", "Dessert"], speaking: f.speaking };
   } else if (ci === 1) {
     // Ask about the same photo from the answer sheet.
     phone.vfClass = "";
+    phone.thumb = IMG.menu;
     f.showLang = true;
     const typing = lt >= 0.8 && lt < 4.4;
     f.question = ASK.slice(0, Math.max(0, Math.floor((lt - 0.8) * 13)));
@@ -75,7 +74,7 @@ function frameAt(t: number): Frame {
     f.caption = words(ANSWER, n);
     f.speaking = n > 0 && n < 22;
     phone.sheet = {
-      mode: translateTitle,
+      mode: "Auto · Translate",
       img: IMG.menu,
       text: lt < 4.4 ? MENU_LINE : lt < 5.2 ? "Thinking…" : words(ANSWER, n),
       sections: ["First course", "Second course", "Dessert"],
@@ -84,9 +83,10 @@ function frameAt(t: number): Frame {
     };
   } else if (ci === 2) {
     phone.img = IMG.signPortrait;
+    phone.mode = "translate";
+    phone.thumb = IMG.menu;
     f.showLang = true;
-    if (lt < 4) phone.lastRow = { thumb: IMG.menu, text: MENU_LINE };
-    press();
+    shoot();
     if (lt >= 6.5) {
       const k = Math.floor((lt - 6.5) * 9);
       f.caption = k >= SIGN_EN.length ? SIGN_EN : SIGN_EN.slice(0, k) + SIGN_ES.slice(k);
@@ -105,9 +105,8 @@ function frameAt(t: number): Frame {
   } else if (ci === 3) {
     phone.img = IMG.medicinePortrait;
     phone.mode = "menu";
-    phone.showLangRow = false;
-    if (lt < 4) phone.lastRow = { thumb: IMG.sign, text: "This is a Spanish sign. It says: Skateboarding prohibited." };
-    press();
+    phone.thumb = IMG.sign;
+    shoot();
     const idx = Math.floor((lt - 4) / 1.8);
     f.showCaption = lt < 4;
     f.lines = lt >= 4 ? LABEL_LINES.map((text, i) => ({ text, cls: i < idx ? "done" : i === idx ? "now" : "" })) : [];
@@ -260,7 +259,7 @@ export function DemoFilm() {
           <summary>Read the transcript</summary>
           <ol>
             <li>
-              It spots the menu. With Auto on, a phone is held up to a chalkboard “Menú del día” outside a café in Seville. A card appears:
+              It spots the menu. In Auto mode, a phone is held up to a chalkboard “Menú del día” outside a café in Seville. A card appears:
               “Menu detected. Tap to read.” The user taps it, and SightLine says: “{MENU_LINE}”
             </li>
             <li>Just ask. From the answer, the user asks, “{ASK}” SightLine says: “{ANSWER}”</li>

@@ -21,11 +21,33 @@ function toJpegBase64(
   return dataUrl.slice(dataUrl.indexOf(",") + 1);
 }
 
-export function captureVideoFrame(video: HTMLVideoElement): string {
+export function captureVideoFrame(video: HTMLVideoElement, frame?: DOMRect | null): string {
   if (!video.videoWidth || !video.videoHeight) {
     throw new Error("The camera isn't ready yet");
   }
-  return toJpegBase64(video, video.videoWidth, video.videoHeight);
+  if (!frame) return toJpegBase64(video, video.videoWidth, video.videoHeight);
+
+  // Crop to the on-screen viewfinder so the photo matches the camera corners. The video is shown
+  // with object-fit: cover, so map screen pixels back to video pixels through that scale and offset.
+  const box = video.getBoundingClientRect();
+  const scale = Math.max(box.width / video.videoWidth, box.height / video.videoHeight);
+  const offX = box.left + (box.width - video.videoWidth * scale) / 2;
+  const offY = box.top + (box.height - video.videoHeight * scale) / 2;
+  const sx = Math.max(0, (frame.left - offX) / scale);
+  const sy = Math.max(0, (frame.top - offY) / scale);
+  const sw = Math.min(video.videoWidth - sx, frame.width / scale);
+  const sh = Math.min(video.videoHeight - sy, frame.height / scale);
+  if (sw < 32 || sh < 32) return toJpegBase64(video, video.videoWidth, video.videoHeight);
+
+  const out = Math.min(1, MAX_SIDE / Math.max(sw, sh));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(sw * out);
+  canvas.height = Math.round(sh * out);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas is not available");
+  ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL("image/jpeg", QUALITY);
+  return dataUrl.slice(dataUrl.indexOf(",") + 1);
 }
 
 export async function fileToBase64(file: File): Promise<string> {

@@ -65,22 +65,22 @@ export const Sparkle = ({ size = 11 }: P) => (
   </svg>
 );
 
-export const Gear = ({ size = 14 }: P) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="2.2" {...base}>
+export const Gear = ({ size = 14, light = false }: P & { light?: boolean }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={light ? "#fff" : "#000"} strokeWidth="2.2" {...base}>
     <circle cx="12" cy="12" r="3" />
     <path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" />
   </svg>
 );
 
-export const Clock = ({ size = 14 }: P) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="2.2" strokeLinecap="round" {...base}>
+export const Clock = ({ size = 14, light = false }: P & { light?: boolean }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={light ? "#fff" : "#000"} strokeWidth="2.2" strokeLinecap="round" {...base}>
     <circle cx="12" cy="12" r="9" />
     <path d="M12 7v5l3 2" />
   </svg>
 );
 
-export const Viewfinder = ({ size = 16 }: P) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" {...base}>
+export const Viewfinder = ({ size = 16, dark = false }: P & { dark?: boolean }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={dark ? "#000" : "#fff"} strokeWidth="2.2" strokeLinecap="round" {...base}>
     <path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16" />
   </svg>
 );
@@ -93,8 +93,8 @@ export const Photo = ({ size = 16 }: P) => (
   </svg>
 );
 
-export const Mic = ({ size = 16 }: P) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="2" strokeLinecap="round" {...base}>
+export const Mic = ({ size = 16, light = false }: P & { light?: boolean }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={light ? "#fff" : "#000"} strokeWidth="2" strokeLinecap="round" {...base}>
     <rect x="9" y="2.5" width="6" height="12" rx="3" />
     <path d="M5 11a7 7 0 0 0 14 0M12 18v3.5" />
   </svg>

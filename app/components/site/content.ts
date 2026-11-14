@@ -104,18 +104,20 @@ export const CHAPTERS = [
 export const FILM_LENGTH = 70;
 
 export const MORE_FEATURES = [
-  { title: "Auto capture", body: "Hold your phone steady on something. SightLine spots the menu, label, or sign and offers to read it. No hunting for a button." },
+  { title: "Auto mode", body: "Leave it on Auto and SightLine works out whether you're showing it a menu, a label, a sign, or a room, and answers the right way." },
+  { title: "Detect", body: "Hold your phone steady on something. A card pops up, “Menú del día · Tap to read”, and nothing is read until you tap it." },
+  { title: "Barcodes", body: "Point at a barcode and hear the product: nutrition, ingredients, allergens, and any FDA recalls, from Open Food Facts and openFDA." },
+  { title: "Book mode", body: "SightLine reads a printed page sentence by sentence, highlights where it is, and tells you when to turn the page." },
   { title: "From the web", body: "Point at a product or a restaurant and SightLine checks the web for recalls and FDA warnings first, then nutrition, prices, and reviews, with sources." },
   { title: "Ask your history", body: "“How much was the salmon?” SightLine keeps the text of what you scanned, so you can ask about it later." },
-  { title: "A natural voice", body: "Answers are read by lifelike ElevenLabs voices in eight styles, with your phone's own voice as a backup." },
-  { title: "Answers you can skim", body: "About 30 words out loud first. Nutrition, allergens, warnings, and menu sections wait underneath. Long-press one to hear it." },
+  { title: "A natural voice", body: "Answers are read by lifelike ElevenLabs voices, with your phone's own voice as a backup." },
   { title: "Hands-free hat camera", body: "Clip a small camera to your cap and keep both hands free. Your phone speaks what the hat sees." },
 ];
 
 export const A11Y_FEATURES = [
   { title: "Screen readers", body: "Every control is labelled for VoiceOver and TalkBack, and answers are announced as they arrive. Turn Auto-speak off in Settings so SightLine never talks over your reader." },
-  { title: "High contrast", body: "Black on white, and every text color passes WCAG AA. The selected mode is filled black with a check mark, not just a color." },
-  { title: "Big targets", body: "Every control is at least 44 points. Capture is the biggest button on the screen and never scrolls away." },
+  { title: "High contrast", body: "White text on a dark band over the camera, black on white in answers, and every text color passes WCAG AA. The selected mode is underlined, not just colored." },
+  { title: "Big targets", body: "Every control is at least 44 points. The shutter is the biggest button on the screen and never moves." },
   { title: "Feel it", body: "A tap of haptic feedback when it starts looking, and another when the answer is ready, so you know without looking." },
   { title: "Your speed", body: "Speech from 0.75x to 1.5x, replay any time, and a Stop button that stops right away." },
   { title: "Your text size", body: "Text scales with your phone's text size setting, and every animation respects Reduce Motion." },
