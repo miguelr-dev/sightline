@@ -66,31 +66,62 @@ function writePref(key: string, value: unknown) {
   }
 }
 
-// Shared button styling: 64px minimum target, thick border, visible focus.
-const btn =
-  "min-h-16 min-w-16 rounded-2xl border-2 px-4 text-lg font-bold leading-tight " +
-  "focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus)] " +
-  "disabled:opacity-60 disabled:cursor-not-allowed";
-const btnDark = `${btn} border-white bg-black text-white hover:bg-neutral-800`;
-const btnOn = `${btn} border-[var(--accent)] bg-[var(--accent)] text-black`;
+// White, Apple-style UI matching the iPhone app (mobile/src/theme.ts): black on white, a grey
+// surface for controls, black pill buttons, and one red accent for listening. Every text colour
+// passes WCAG AA; every control is at least 48px tall.
+const focus =
+  "focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-black";
+const pill = `inline-flex min-h-12 items-center justify-center gap-2 rounded-full px-5 text-[17px] font-semibold leading-tight ${focus} disabled:cursor-not-allowed disabled:opacity-50`;
+const pillBlack = `${pill} bg-black text-white hover:bg-[#2C2C2E]`;
+const pillGrey = `${pill} bg-[#F2F2F7] text-black hover:bg-[#E5E5EA]`;
+const roundBtn = `inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-[#C6C6C8] bg-white text-black hover:bg-[#F2F2F7] ${focus} disabled:opacity-50`;
+const overlayPill = `inline-flex min-h-11 items-center gap-1.5 rounded-full px-4 text-[15px] font-semibold shadow-[0_1px_8px_rgba(0,0,0,0.22)] ${focus}`;
+const caption = "text-[13px] font-semibold uppercase tracking-[0.04em] text-[#55555A]";
 
-/** Item-dependent detail sections, or the flat details text from older responses. */
+function Svg({ children, size = 20 }: { children: React.ReactNode; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      {children}
+    </svg>
+  );
+}
+const I = {
+  camera: (
+    <svg width={20} height={20} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+      <path d="M4.5 7h2.8l1.7-2.5h6l1.7 2.5h2.8A1.5 1.5 0 0 1 21 8.5V18a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18V8.5A1.5 1.5 0 0 1 4.5 7z" />
+      <circle cx="12" cy="13" r="3.4" fill="#000" />
+    </svg>
+  ),
+  photo: <Svg><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 16l-5-5-9 9" /></Svg>,
+  mic: <Svg><rect x="9" y="2.5" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3.5" /></Svg>,
+  check: <Svg size={16}><path d="M4.5 12.5l5 5 10-11" /></Svg>,
+  chevron: <Svg size={16}><path d="M6 9l6 6 6-6" /></Svg>,
+  replay: <Svg size={18}><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5" /><path d="M3.5 3.5v5h5" /></Svg>,
+  stop: <svg width={14} height={14} viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" /></svg>,
+  globe: <Svg size={18}><circle cx="12" cy="12" r="9.5" /><path d="M2.5 12h19M12 2.5c2.6 2.7 3.9 5.9 3.9 9.5s-1.3 6.8-3.9 9.5c-2.6-2.7-3.9-5.9-3.9-9.5s1.3-6.8 3.9-9.5z" /></Svg>,
+  speaker: <Svg size={16}><path d="M4 9h3.5L13 4.5v15L7.5 15H4z" /><path d="M16.5 9a4 4 0 0 1 0 6" /></Svg>,
+  speakerOff: <Svg size={16}><path d="M4 9h3.5L13 4.5v15L7.5 15H4z" /><path d="M16.5 9.5l5 5M21.5 9.5l-5 5" /></Svg>,
+  send: <Svg size={18}><path d="M12 19V5M6 11l6-6 6 6" /></Svg>,
+};
+
+/** Item-dependent detail sections as collapsible rows, like the iPhone app. */
 function Sections({ sections, fallback }: { sections?: Section[]; fallback?: string }) {
   if (sections?.length) {
     return (
-      <div className="mt-2 flex flex-col gap-3">
+      <div className="flex flex-col">
         {sections.map((s, i) => (
-          <div key={`${i}-${s.title}`}>
-            <h3 className="text-lg font-bold">{s.title}</h3>
-            <p className="whitespace-pre-wrap text-lg leading-relaxed">{s.body}</p>
-          </div>
+          <details key={`${i}-${s.title}`} className="group border-t border-[#E5E5EA]">
+            <summary className={`flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 text-[17px] font-semibold [&::-webkit-details-marker]:hidden ${focus}`}>
+              {s.title}
+              <span className="transition-transform group-open:rotate-180 motion-reduce:transition-none">{I.chevron}</span>
+            </summary>
+            <p className="whitespace-pre-wrap pb-3 text-[17px] leading-relaxed">{s.body}</p>
+          </details>
         ))}
       </div>
     );
   }
-  return fallback ? (
-    <p className="mt-2 whitespace-pre-wrap text-lg leading-relaxed">{fallback}</p>
-  ) : null;
+  return fallback ? <p className="whitespace-pre-wrap text-[17px] leading-relaxed">{fallback}</p> : null;
 }
 
 export default function SightLine() {
@@ -673,374 +704,372 @@ export default function SightLine() {
   // ---------- Onboarding ----------
   if (!started) {
     return (
-      <main className="mx-auto flex min-h-dvh max-w-xl flex-col justify-center gap-8 px-6 py-10">
-        <div className="flex flex-col gap-4">
-          <h1 className="text-5xl font-extrabold tracking-tight">SightLine</h1>
-          <p className="text-2xl font-semibold text-[var(--accent)]">
-            Point your camera. Hear the world.
-          </p>
-          <p className="text-xl leading-relaxed">
-            SightLine reads text, describes what&apos;s around you, explains menus and labels, and
-            translates signs, out loud.
-          </p>
-          <p className="text-lg leading-relaxed text-[var(--muted)]">
-            When you tap Start, your browser will ask to use the camera. Each photo is sent to an AI
-            model to be described, and product or restaurant names may be searched on the web.
-            SightLine never saves your photos. It keeps the text of recent answers so you can look
-            back at them.
-          </p>
+      <main className="min-h-dvh bg-white text-black">
+        <div className="mx-auto flex min-h-dvh max-w-xl flex-col justify-center gap-8 px-6 py-10">
+          <div className="flex flex-col gap-4">
+            <svg width={56} height={56} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+              <rect x="1" y="1" width="30" height="30" rx="8" fill="#000" />
+              <ellipse cx="16" cy="16" rx="11" ry="6.8" fill="none" stroke="#fff" strokeWidth="2.6" />
+              <circle cx="16" cy="16" r="3.6" fill="#fff" />
+            </svg>
+            <h1 className="text-[34px] font-bold leading-tight tracking-tight">SightLine</h1>
+            <p className="text-[22px] font-semibold leading-snug">Point your camera. Hear the world.</p>
+            <p className="text-[17px] leading-relaxed">
+              SightLine reads text, describes what&apos;s around you, explains menus and labels, and translates signs, out loud.
+            </p>
+            <p className="text-[15px] leading-relaxed text-[#55555A]">
+              When you tap Start, your browser will ask to use the camera. Each photo is sent to an AI model to be described, and
+              product or restaurant names may be searched on the web. SightLine never saves your photos. It keeps the text of
+              recent answers so you can look back at them.
+            </p>
+          </div>
+          <button type="button" onClick={begin} className={`${pillBlack} min-h-14 text-[19px]`}>
+            {I.camera}
+            Start SightLine
+          </button>
         </div>
-        <button type="button" onClick={begin} className={`${btnOn} min-h-24 text-2xl`}>
-          Start SightLine
-        </button>
       </main>
     );
   }
 
   // ---------- Main screen ----------
-  const cameraStatus =
-    camera === "on"
-      ? "Camera on"
-      : camera === "starting"
-        ? "Starting camera…"
-        : "Camera off";
+  const cameraStatus = camera === "on" ? "Camera on" : camera === "starting" ? "Starting camera…" : "Camera off";
+  const hasAnswer = Boolean(busy || status || result);
 
   return (
-    <div className="relative h-dvh bg-black">
+    <div className="relative h-dvh overflow-hidden bg-black text-black">
       {/* Live preview. Hidden from screen readers: it has no information they can use. */}
       <video
         ref={videoRef}
-        className="pointer-events-none fixed inset-0 h-full w-full object-cover opacity-90"
+        className="pointer-events-none fixed inset-0 h-full w-full object-cover"
         playsInline
         muted
         autoPlay
         aria-hidden="true"
       />
 
-      <div className="relative mx-auto flex h-dvh max-w-2xl flex-col gap-3 px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))]">
-        <header className="flex shrink-0 items-center justify-between gap-3 rounded-2xl bg-black/85 p-3">
-          <div>
-            <h1 className="text-2xl font-extrabold">SightLine</h1>
-            <p className="text-base text-[var(--muted)]">
-              <span aria-hidden="true">{camera === "on" ? "● " : "○ "}</span>
+      <div className="relative mx-auto flex h-dvh max-w-2xl flex-col">
+        {/* Top pills over the camera, as in the iPhone app */}
+        <header className="flex shrink-0 items-center justify-between gap-3 px-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+          <div className={`${overlayPill} min-w-0 whitespace-nowrap bg-white text-black`}>
+            <h1 className="text-[17px] font-bold">SightLine</h1>
+            <span className="sr-only">, </span>
+            <span className="flex items-center gap-1 text-[13px] font-semibold text-[#55555A]">
+              <span aria-hidden="true" className={`inline-block h-2 w-2 rounded-full ${camera === "on" ? "bg-[#D70015]" : "border border-[#55555A]"}`} />
               {cameraStatus}
-            </p>
+            </span>
           </div>
           <button
             type="button"
             onClick={toggleAutoSpeak}
             aria-pressed={autoSpeak}
-            className={`${autoSpeak ? btnOn : btnDark} whitespace-nowrap`}
+            className={`${overlayPill} whitespace-nowrap ${autoSpeak ? "bg-black text-white ring-1 ring-white/60" : "bg-white text-black"}`}
           >
-            Auto-speak: {autoSpeak ? "On" : "Off"}
+            {autoSpeak ? I.speaker : I.speakerOff}
+            Speak {autoSpeak ? "on" : "off"}
           </button>
         </header>
 
-        <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
-        <nav aria-label="Mode" className="shrink-0 rounded-2xl bg-black/85 p-3">
-          <h2 className="sr-only">Mode</h2>
-          <div className="grid grid-cols-2 gap-2">
-            {MODES.map((m) => {
-              const on = mode === m;
-              return (
-                <button
-                  key={m}
-                  type="button"
-                  aria-pressed={on}
-                  aria-describedby={`hint-${m}`}
-                  onClick={() => chooseMode(m)}
-                  className={`${on ? btnOn : btnDark} text-xl ${on ? "border-4" : ""}`}
-                >
-                  <span aria-hidden="true">{on ? "✓ " : ""}</span>
-                  {MODE_LABELS[m]}
-                  <span id={`hint-${m}`} className="sr-only">
-                    {MODE_HINTS[m]}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-          {mode === "translate" && (
-            <div className="mt-3 flex items-center gap-3">
-              <label htmlFor="language" className="text-lg font-bold">
-                Translate to
-              </label>
-              <select
-                id="language"
-                value={language}
-                onChange={(e) => chooseLanguage(e.target.value)}
-                className="min-h-16 flex-1 rounded-2xl border-2 border-white bg-black px-3 text-lg font-bold text-white focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus)]"
-              >
-                {LANGUAGES.map((l) => (
-                  <option key={l.name} value={l.name}>
-                    {l.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-        </nav>
+        {/* Camera shows through this gap */}
+        <div className="min-h-0 flex-1" />
 
-        <section
-          aria-labelledby="result-heading"
-          className="flex min-h-40 shrink-0 grow flex-col gap-3 rounded-2xl bg-black/90 p-4"
-        >
-          <h2 id="result-heading" className="text-lg font-bold text-[var(--muted)]">
-            {result?.question ? `Answer to: “${result.question}”` : "Result"}
-          </h2>
-
-          <div aria-live="polite" aria-atomic="true" className="flex flex-col gap-2">
-            {busy && (
-              <p className="flex items-center gap-3 text-2xl font-bold">
-                <span
-                  aria-hidden="true"
-                  className="inline-block h-6 w-6 rounded-full border-4 border-white border-t-transparent motion-safe:animate-spin"
-                />
-                {status}
-              </p>
-            )}
-            {!busy && status && <p className="text-xl">{status}</p>}
-            {!busy && result && (
-              <p
-                className="text-2xl leading-snug font-semibold"
-                lang={result.langCode}
-              >
-                {result.error && <span className="font-extrabold">Error: </span>}
-                {result.spokenText}
-              </p>
-            )}
-            {!busy && !result && !status && (
-              <p className="text-xl text-[var(--muted)]">
-                Choose a mode, point your camera, and tap Capture.
-              </p>
-            )}
-          </div>
-
-          {result?.details && !busy && (
-            <details className="rounded-xl border-2 border-white/60 p-3">
-              <summary className="flex min-h-16 cursor-pointer items-center text-lg font-bold focus-visible:outline focus-visible:outline-4 focus-visible:outline-[var(--focus)]">
-                More details
-              </summary>
-              <Sections sections={result.sections} fallback={result.details} />
-            </details>
-          )}
-
-          {/* Web lookup results get their own live region so the first answer isn't re-read. */}
-          <div aria-live="polite" aria-atomic="true" className="flex flex-col gap-2">
-            {!busy && web?.status === "loading" && (
-              <p className="flex items-center gap-3 border-t-2 border-white/60 pt-3 text-xl font-semibold">
-                <span
-                  aria-hidden="true"
-                  className="inline-block h-5 w-5 shrink-0 rounded-full border-4 border-white border-t-transparent motion-safe:animate-spin"
-                />
-                {web.query ? `Checking the web for ${web.query}…` : "Checking the web…"}
-              </p>
-            )}
-            {!busy && web?.status === "done" && (
-              <p
-                className="border-t-2 border-white/60 pt-3 text-2xl leading-snug font-semibold"
-                lang={webLang}
-              >
-                {web.data.error && <span className="font-extrabold">Error: </span>}
-                {web.data.spokenText}
-              </p>
-            )}
-          </div>
-
-          {!busy &&
-            web?.status === "done" &&
-            (web.data.details || web.data.sources.length > 0) && (
-              <details className="rounded-xl border-2 border-white/60 p-3">
-                <summary className="flex min-h-16 cursor-pointer items-center text-lg font-bold focus-visible:outline focus-visible:outline-4 focus-visible:outline-[var(--focus)]">
-                  Web details and sources
-                </summary>
-                {web.data.query && (
-                  <p className="mt-2 text-lg text-[var(--muted)]">Searched for: {web.data.query}</p>
-                )}
-                <Sections sections={web.data.sections} fallback={web.data.details} />
-                {web.data.sources.length > 0 && (
-                  <>
-                    <h3 className="mt-3 text-lg font-bold">Sources</h3>
-                    <ul className="mt-1 flex flex-col gap-1">
-                      {web.data.sources.map((src) => (
-                        <li key={src.url}>
-                          <a
-                            href={src.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex min-h-16 items-center break-words text-lg underline underline-offset-4 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus)]"
-                          >
-                            {src.title}
-                            <span className="sr-only"> (opens in a new tab)</span>
-                          </a>
-                        </li>
-                      ))}
-                    </ul>
-                  </>
-                )}
-              </details>
-            )}
-
-          {lastImage && (
-            // eslint-disable-next-line @next/next/no-img-element -- in-memory data URL
-            <img
-              src={`data:image/jpeg;base64,${lastImage}`}
-              alt="The last photo you took"
-              className="h-24 w-auto self-start rounded-lg border-2 border-white/60 object-cover"
-            />
-          )}
-        </section>
-
-        {result && (
-          <section aria-label="Playback" className="flex shrink-0 flex-col gap-2 rounded-2xl bg-black/85 p-3">
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  unlockAll();
-                  replay();
-                }}
-                className={btnDark}
-                disabled={busy}
-              >
-                <span aria-hidden="true">↻ </span>Replay
-              </button>
-              <button type="button" onClick={stopSpeech} className={btnDark}>
-                <span aria-hidden="true">■ </span>Stop
-              </button>
-            </div>
-            {features?.lookup && !result.error && (
-              <button
-                type="button"
-                onClick={() => {
-                  unlockAll();
-                  void runLookup({ auto: false });
-                }}
-                className={btnDark}
-                disabled={busy || web?.status === "loading"}
-                aria-busy={web?.status === "loading"}
-              >
-                <span aria-hidden="true">🌐 </span>
-                {web?.status === "loading" ? "Checking the web…" : "Look it up on the web"}
-              </button>
-            )}
-            <div role="group" aria-labelledby="speed-label" className="flex items-center gap-2">
-              <span id="speed-label" className="text-lg font-bold">
-                Speed
-              </span>
-              <div className="grid flex-1 grid-cols-4 gap-2">
-                {SPEEDS.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    aria-pressed={rate === s}
-                    aria-label={`${s} times speed`}
-                    onClick={() => chooseRate(s)}
-                    className={`${rate === s ? btnOn : btnDark} px-1`}
-                  >
-                    {s}×
-                  </button>
-                ))}
+        {/* The white bottom sheet */}
+        <div className="flex max-h-[78dvh] shrink-0 flex-col rounded-t-[28px] bg-white shadow-[0_-8px_30px_rgba(0,0,0,0.25)]">
+          <main className="flex min-h-0 flex-col gap-3 overflow-y-auto px-4 pt-4">
+            <nav aria-label="Mode">
+              <h2 className="sr-only">Mode</h2>
+              <div className="grid grid-cols-2 gap-2">
+                {MODES.map((m) => {
+                  const on = mode === m;
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      aria-pressed={on}
+                      aria-describedby={`hint-${m}`}
+                      onClick={() => chooseMode(m)}
+                      className={`inline-flex min-h-[52px] items-center justify-center gap-1.5 rounded-[14px] px-3 text-[17px] ${focus} ${
+                        on ? "bg-black font-bold text-white" : "bg-[#F2F2F7] font-medium text-black hover:bg-[#E5E5EA]"
+                      }`}
+                    >
+                      {on && I.check}
+                      {MODE_LABELS[m]}
+                      <span id={`hint-${m}`} className="sr-only">
+                        {MODE_HINTS[m]}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
-            </div>
-          </section>
-        )}
+              <p className="mt-2 px-1 text-[15px] text-[#55555A]" aria-hidden="true">
+                {MODE_HINTS[mode]}
+              </p>
+              {mode === "translate" && (
+                <div className="mt-2 flex min-h-12 items-center justify-between gap-3 rounded-[14px] bg-[#F2F2F7] px-4">
+                  <label htmlFor="language" className="text-[17px]">
+                    Translate to
+                  </label>
+                  <select
+                    id="language"
+                    value={language}
+                    onChange={(e) => chooseLanguage(e.target.value)}
+                    className={`min-h-11 rounded-lg bg-transparent text-right text-[17px] font-semibold ${focus}`}
+                  >
+                    {LANGUAGES.map((l) => (
+                      <option key={l.name} value={l.name}>
+                        {l.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </nav>
 
-        {lastImage && (
-          <section aria-label="Ask about this photo" className="flex shrink-0 flex-col gap-2 rounded-2xl bg-black/85 p-3">
-            {canListen && (
-              <button
-                type="button"
-                onClick={() => listen("question")}
-                aria-pressed={listening === "question"}
-                className={listening === "question" ? btnOn : btnDark}
-                disabled={busy || listening === "command"}
-              >
-                <span aria-hidden="true">🎤 </span>
-                {listening === "question"
-                  ? recording
-                    ? "Listening… tap when done"
-                    : "Listening… tap to cancel"
-                  : "Ask about this"}
-              </button>
+            <section aria-labelledby="result-heading" className={hasAnswer ? "flex flex-col gap-3" : "sr-only"}>
+              <div className="flex items-center justify-between gap-3 border-t border-[#E5E5EA] pt-3">
+                <h2 id="result-heading" className={caption}>
+                  {result?.question ? "Answer" : result ? MODE_LABELS[result.mode] : "Result"}
+                </h2>
+              </div>
+              {result?.question && !busy && (
+                <p className="text-[15px] text-[#55555A]">
+                  You asked: <span className="font-semibold text-black">“{result.question}”</span>
+                </p>
+              )}
+
+              <div aria-live="polite" aria-atomic="true" className="flex flex-col gap-2">
+                {busy && (
+                  <p className="flex items-center gap-3 text-[20px] font-semibold">
+                    <span aria-hidden="true" className="inline-block h-5 w-5 rounded-full border-[3px] border-black border-t-transparent motion-safe:animate-spin" />
+                    {status}
+                  </p>
+                )}
+                {!busy && status && <p className="text-[17px]">{status}</p>}
+                {!busy && result && (
+                  <p className={`text-[20px] font-semibold leading-snug ${result.error ? "border-l-4 border-[#D70015] pl-3" : ""}`} lang={result.langCode}>
+                    {result.error && <span className="text-[#D70015]">Error: </span>}
+                    {result.spokenText}
+                  </p>
+                )}
+                {!busy && !result && !status && <p className="text-[17px] text-[#55555A]">Choose a mode, point your camera, and tap Capture.</p>}
+              </div>
+
+              {lastImage && (
+                // eslint-disable-next-line @next/next/no-img-element -- in-memory data URL
+                <img src={`data:image/jpeg;base64,${lastImage}`} alt="The last photo you took" className="h-24 w-auto self-start rounded-xl object-cover" />
+              )}
+
+              {result && (
+                <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Playback">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      unlockAll();
+                      replay();
+                    }}
+                    className={pillBlack}
+                    disabled={busy}
+                  >
+                    {I.replay}
+                    Replay
+                  </button>
+                  <button type="button" onClick={stopSpeech} className={pillGrey}>
+                    {I.stop}
+                    Stop
+                  </button>
+                </div>
+              )}
+
+              {result && (
+                <div role="group" aria-labelledby="speed-label" className="flex flex-col gap-1.5">
+                  <span id="speed-label" className={caption}>
+                    Speed
+                  </span>
+                  <div className="grid grid-cols-4 gap-1 rounded-[14px] bg-[#F2F2F7] p-1">
+                    {SPEEDS.map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        aria-pressed={rate === s}
+                        aria-label={`${s} times speed`}
+                        onClick={() => chooseRate(s)}
+                        className={`min-h-11 rounded-[10px] text-[15px] font-semibold ${focus} ${rate === s ? "bg-black text-white" : "text-black hover:bg-[#E5E5EA]"}`}
+                      >
+                        {s}×
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {result?.details && !busy && <Sections sections={result.sections} fallback={result.details} />}
+
+              {features?.lookup && result && !result.error && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    unlockAll();
+                    void runLookup({ auto: false });
+                  }}
+                  className={pillGrey}
+                  disabled={busy || web?.status === "loading"}
+                  aria-busy={web?.status === "loading"}
+                >
+                  {I.globe}
+                  {web?.status === "loading" ? "Checking the web…" : "Look it up on the web"}
+                </button>
+              )}
+
+              {/* Web lookup results get their own live region so the first answer isn't re-read. */}
+              <div aria-live="polite" aria-atomic="true" className="flex flex-col gap-2">
+                {!busy && web?.status === "loading" && (
+                  <p className="flex items-center gap-3 rounded-[14px] bg-[#F2F2F7] p-4 text-[17px] font-semibold">
+                    <span aria-hidden="true" className="inline-block h-5 w-5 shrink-0 rounded-full border-[3px] border-black border-t-transparent motion-safe:animate-spin" />
+                    {web.query ? `Checking the web for ${web.query}…` : "Checking the web…"}
+                  </p>
+                )}
+                {!busy && web?.status === "done" && (
+                  <div className="rounded-[14px] bg-[#F2F2F7] p-4">
+                    <p className={caption}>From the web</p>
+                    <p className="mt-1 text-[17px] leading-relaxed" lang={webLang}>
+                      {web.data.error && <span className="font-semibold text-[#D70015]">Error: </span>}
+                      {web.data.spokenText}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {!busy && web?.status === "done" && (web.data.details || web.data.sources.length > 0) && (
+                <div className="flex flex-col">
+                  {web.data.query && <p className="text-[15px] text-[#55555A]">Searched for: {web.data.query}</p>}
+                  <Sections sections={web.data.sections} fallback={web.data.details} />
+                  {web.data.sources.length > 0 && (
+                    <>
+                      <h3 className={`${caption} mt-3`}>Sources</h3>
+                      <ul className="mt-1 flex flex-col">
+                        {web.data.sources.map((src) => (
+                          <li key={src.url} className="border-t border-[#E5E5EA]">
+                            <a
+                              href={src.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className={`flex min-h-12 items-center break-words py-2 text-[17px] underline underline-offset-4 ${focus}`}
+                            >
+                              {src.title}
+                              <span className="sr-only"> (opens in a new tab)</span>
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </div>
+              )}
+            </section>
+
+            {lastImage && (
+              <section aria-label="Ask about this photo" className="flex flex-col gap-2 border-t border-[#E5E5EA] pt-3">
+                <form
+                  className="flex items-center gap-2 rounded-[14px] bg-[#F2F2F7] py-1 pl-4 pr-1"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    ask(question);
+                  }}
+                >
+                  <label htmlFor="question" className="sr-only">
+                    Ask about this photo
+                  </label>
+                  <input
+                    id="question"
+                    value={question}
+                    onChange={(e) => setQuestion(e.target.value)}
+                    placeholder="Ask about this"
+                    autoComplete="off"
+                    className={`min-h-11 min-w-0 flex-1 bg-transparent text-[17px] text-black placeholder:text-[#55555A] ${focus}`}
+                  />
+                  {canListen && (
+                    <button
+                      type="button"
+                      onClick={() => listen("question")}
+                      aria-pressed={listening === "question"}
+                      aria-label={
+                        listening === "question" ? (recording ? "Listening, tap when done" : "Listening, tap to cancel") : "Ask with your voice"
+                      }
+                      className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${focus} ${
+                        listening === "question" ? "bg-[#D70015] text-white" : "text-black hover:bg-[#E5E5EA]"
+                      }`}
+                      disabled={busy || listening === "command"}
+                    >
+                      {I.mic}
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    aria-label="Ask"
+                    className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black text-white ${focus} disabled:opacity-40`}
+                    disabled={busy || !question.trim()}
+                  >
+                    {I.send}
+                  </button>
+                </form>
+                {listening === "question" && (
+                  <p className="text-[15px] font-semibold text-[#D70015]">{recording ? "Listening… tap the mic when done" : "Listening…"}</p>
+                )}
+              </section>
             )}
-            <form
-              className="flex gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                ask(question);
-              }}
-            >
-              <label htmlFor="question" className="sr-only">
-                Type a question about the photo
-              </label>
+          </main>
+
+          {/* Bottom bar: upload, Capture, voice command */}
+          <div className="flex shrink-0 flex-col gap-1 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
+            {listening === "command" && (
+              <p className="text-center text-[15px] font-semibold text-[#D70015]" aria-live="polite">
+                {recording ? "Listening… tap the mic when done" : "Listening…"}
+              </p>
+            )}
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={() => fileRef.current?.click()} className={roundBtn} disabled={busy} aria-label="Upload photo">
+                {I.photo}
+              </button>
               <input
-                id="question"
-                value={question}
-                onChange={(e) => setQuestion(e.target.value)}
-                placeholder={canListen ? "Or type a question" : "Ask about this photo"}
-                autoComplete="off"
-                className="min-h-16 min-w-0 flex-1 rounded-2xl border-2 border-white bg-black px-4 text-lg text-white placeholder:text-neutral-300 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus)]"
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                tabIndex={-1}
+                aria-hidden="true"
+                onChange={(e) => {
+                  void onFile(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
               />
-              <button type="submit" className={btnDark} disabled={busy || !question.trim()}>
-                Ask
-              </button>
-            </form>
-          </section>
-        )}
-
-        </main>
-
-        <div className="flex shrink-0 flex-col gap-2 pb-[env(safe-area-inset-bottom)]">
-          <div className={`grid gap-2 ${canListen ? "grid-cols-2" : "grid-cols-1"}`}>
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              className={btnDark}
-              disabled={busy}
-            >
-              <span aria-hidden="true">⬆ </span>Upload photo
-            </button>
-            {canListen && (
               <button
                 type="button"
-                onClick={() => listen("command")}
-                aria-pressed={listening === "command"}
-                className={listening === "command" ? btnOn : btnDark}
-                disabled={busy || listening === "question"}
+                onClick={() => capture()}
+                aria-busy={busy}
+                aria-label={busy ? "Looking" : `Capture, ${MODE_LABELS[mode]} mode`}
+                className={`${pillBlack} min-h-14 flex-1 text-[19px]`}
               >
-                <span aria-hidden="true">🎤 </span>
-                {listening === "command"
-                  ? recording
-                    ? "Listening… tap when done"
-                    : "Listening…"
-                  : "Voice command"}
+                {busy ? (
+                  <span aria-hidden="true" className="inline-block h-5 w-5 rounded-full border-[3px] border-white border-t-transparent motion-safe:animate-spin" />
+                ) : (
+                  I.camera
+                )}
+                {busy ? "Looking…" : "Capture"}
               </button>
-            )}
+              {canListen && (
+                <button
+                  type="button"
+                  onClick={() => listen("command")}
+                  aria-pressed={listening === "command"}
+                  aria-label={listening === "command" ? (recording ? "Listening, tap when done" : "Listening") : "Voice command"}
+                  className={`${roundBtn} ${listening === "command" ? "border-[#D70015] bg-[#D70015] text-white hover:bg-[#D70015]" : ""}`}
+                  disabled={busy || listening === "question"}
+                >
+                  {I.mic}
+                </button>
+              )}
+            </div>
           </div>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            className="sr-only"
-            tabIndex={-1}
-            aria-hidden="true"
-            onChange={(e) => {
-              void onFile(e.target.files?.[0]);
-              e.target.value = "";
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => capture()}
-            aria-busy={busy}
-            className={`${btnOn} min-h-24 text-3xl`}
-          >
-            {busy ? "Working…" : `Capture`}
-            <span className="block text-lg font-semibold">
-              {MODE_LABELS[mode]} mode
-            </span>
-          </button>
         </div>
       </div>
     </div>
