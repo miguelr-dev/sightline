@@ -61,8 +61,8 @@
 .izoom span.on{background:#fff;color:#000}
 .iph{position:relative;display:block;flex:none}
 .imag{position:absolute;right:7px;bottom:7px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;display:flex;align-items:center;justify-content:center}
-.istrip{position:absolute;left:0;right:0;bottom:84px;z-index:5;display:flex;justify-content:center;gap:9px}
-.istrip span{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:9.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#fff}
+.istrip{position:absolute;left:0;right:0;bottom:84px;z-index:5;display:flex;justify-content:center;gap:7px}
+.istrip span{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:8.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#fff}
 .istrip span i{display:block;width:14px;height:2px;border-radius:2px;background:transparent}
 .istrip span.sel{color:#FFD60A}.istrip span.sel i{background:#FFD60A}
 .irow3{position:absolute;left:22px;right:22px;bottom:20px;z-index:5;display:grid;grid-template-columns:1fr auto 1fr;align-items:center}
