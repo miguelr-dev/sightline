@@ -8,6 +8,7 @@ import {
   LANGUAGES,
   findLanguage,
   type AnalyzeResponse,
+  type AskResponse,
   type Features,
   type LookupResponse,
   type Mode,
@@ -22,11 +23,12 @@ import { recordOnce, recorderSupported } from "@/lib/recorder";
 const INTRO =
   "Welcome to SightLine. Point your camera at something and tap Capture at the bottom of the screen, and I'll tell you what's there.";
 const HELP =
-  "You can say: read this, describe, what's on the menu, translate to Spanish, look it up, repeat, or stop. Or ask a question about the last photo.";
+  "You can say: read this, describe, what's on the menu, translate to Spanish, look it up, what did I scan earlier, repeat, or stop. Or ask a question about the last photo.";
 const SPEEDS = [0.75, 1, 1.25, 1.5] as const;
 const MIN_GAP_MS = 1500; // ignore accidental double captures
 const REQUEST_TIMEOUT_MS = 45_000;
 const LOOKUP_TIMEOUT_MS = 20_000; // the server stops itself at about 15 seconds
+const ASK_TIMEOUT_MS = 25_000;
 
 type CameraState = "off" | "starting" | "on" | "unavailable";
 type Result = AnalyzeResponse & { mode: Mode; langCode: string; question?: string };
@@ -426,12 +428,95 @@ export default function SightLine() {
     [analyze, say, unlockAll],
   );
 
+  // ---------- Ask your history (Claude agent over the scans saved in Neon) ----------
+  const runAsk = useCallback(
+    async (text: string) => {
+      const q = text.trim();
+      if (!q) return;
+      if (!latest.current.features?.ask) {
+        const msg = "Scan history isn't set up on this server, so I can't look back at earlier scans.";
+        beepError();
+        setStatus(msg);
+        say(msg);
+        return;
+      }
+      if (busyRef.current) return;
+      busyRef.current = true;
+      setBusy(true);
+      setQuestion("");
+      stopSpeech();
+      lookupIdRef.current++;
+      setWeb(null);
+      beepStart();
+      vibrate(50);
+      setStatus("Checking your history…");
+      say("Checking your history");
+
+      const translate = latest.current.mode === "translate";
+      const langCode = translate ? (findLanguage(latest.current.language)?.code ?? "en-US") : "en-US";
+      let data: AskResponse;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), ASK_TIMEOUT_MS);
+      try {
+        const res = await fetch("/api/ask", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...deviceHeader() },
+          body: JSON.stringify({
+            question: q,
+            language: translate ? latest.current.language : "English",
+            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          }),
+          signal: controller.signal,
+        });
+        data = (await res.json()) as AskResponse;
+        if (!res.ok) data.error = true;
+      } catch {
+        data = { spokenText: "Sorry, I couldn't reach your history just now.", error: true };
+      } finally {
+        clearTimeout(timer);
+      }
+
+      const sections = data.sections ?? [];
+      const speakLang = data.error ? "en-US" : langCode;
+      setResult({
+        spokenText: data.spokenText,
+        sections,
+        details: sections.map((x) => `${x.title}\n${x.body}`).join("\n\n"),
+        error: data.error,
+        mode: latest.current.result?.mode ?? latest.current.mode,
+        langCode: speakLang,
+        question: q,
+      });
+      setStatus("");
+      if (data.error) {
+        beepError();
+        vibrate([120, 60, 120]);
+      } else {
+        beepDone();
+        vibrate([40, 40, 40]);
+      }
+      say(data.spokenText, speakLang);
+      busyRef.current = false;
+      setBusy(false);
+    },
+    [say, stopSpeech],
+  );
+
   const ask = useCallback(
     (text: string) => {
       const q = text.trim();
+      // "What did I scan earlier?" and similar go to the history, not the current photo.
+      if (q && parseCommand(q).type === "ask" && latest.current.features?.ask) {
+        void runAsk(q);
+        return;
+      }
       const img = latest.current.lastImage;
       if (!q) return;
       if (!img) {
+        if (latest.current.features?.ask) {
+          void runAsk(q); // no photo yet: answer from the scan history
+          return;
+        }
         const msg = "Take a photo first, then ask about it.";
         setStatus(msg);
         say(msg);
@@ -444,7 +529,7 @@ export default function SightLine() {
         question: q,
       });
     },
-    [analyze, say],
+    [analyze, runAsk, say],
   );
 
   const replay = useCallback(() => {
@@ -490,13 +575,16 @@ export default function SightLine() {
         case "lookup":
           void runLookup({ auto: false });
           return;
+        case "ask":
+          void runAsk(cmd.text);
+          return;
         case "capture":
           setMode(cmd.mode);
           if (cmd.language) chooseLanguage(cmd.language);
           capture({ mode: cmd.mode, language: cmd.language });
           return;
         case "question":
-          if (latest.current.lastImage) ask(cmd.text);
+          if (latest.current.lastImage || latest.current.features?.ask) ask(cmd.text);
           else {
             const msg = `I heard "${heard}", but that's not a command. ${HELP}`;
             setStatus(msg);
@@ -504,7 +592,7 @@ export default function SightLine() {
           }
       }
     },
-    [ask, capture, chooseLanguage, replay, runLookup, say, stopSpeech],
+    [ask, capture, chooseLanguage, replay, runAsk, runLookup, say, stopSpeech],
   );
 
   const listen = useCallback(

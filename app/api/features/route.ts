@@ -13,6 +13,8 @@ export async function GET() {
     transcribe: eleven,
     lookup: brightDataConfigured() && Boolean(process.env.ANTHROPIC_API_KEY),
     history: dbConfigured(),
+    ask: dbConfigured() && Boolean(process.env.ANTHROPIC_API_KEY),
+    hat: dbConfigured() && Boolean(process.env.DEVICE_SHARED_KEY),
   };
   return Response.json(body, { headers: { "Cache-Control": "no-store" } });
 }

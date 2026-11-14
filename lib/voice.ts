@@ -81,6 +81,7 @@ export type Command =
   | { type: "capture"; mode: Mode; language?: string }
   | { type: "question"; text: string }
   | { type: "lookup" }
+  | { type: "ask"; text: string }
   | { type: "help" };
 
 const LANGUAGE_NAMES = LANGUAGES.map((l) => l.name.toLowerCase()).join("|");
@@ -89,6 +90,13 @@ export function parseCommand(raw: string): Command {
   const t = raw.toLowerCase().replace(/[.,!?]/g, "").trim();
 
   if (/^(stop|quiet|be quiet|silence|shut up|pause)\b/.test(t)) return { type: "stop" };
+  // Questions about earlier scans go to "Ask your history".
+  if (
+    /^(what did i (scan|read|photograph|capture|look at|check)|remind me|did i (scan|read)|when did i|what have i scanned|ask (my )?history)\b/.test(t) ||
+    /\b(earlier|yesterday|last (time|week|night)|this morning|my (scans|history)|i scanned|i read before)\b/.test(t)
+  ) {
+    return { type: "ask", text: raw.trim() };
+  }
   if (/\b(repeat|say (that|it) again|again|replay)\b/.test(t)) return { type: "repeat" };
   if (/^(help|what can i say|commands)\b/.test(t)) return { type: "help" };
   if (

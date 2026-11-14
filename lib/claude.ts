@@ -25,7 +25,7 @@ export function fastModel(): string {
 }
 
 /** Turn thinking off where the model allows it at low effort; spoken answers need speed. */
-function quickThinking(model: string) {
+export function quickThinking(model: string) {
   if (model.startsWith("claude-haiku-5")) return { thinking: { type: "disabled" as const } };
   if (model === "claude-sonnet-5-5") return { thinking: { type: "between_tools" as const } };
   return {}; // e.g. Opus 5.5: thinking can't be turned off; low effort keeps it short

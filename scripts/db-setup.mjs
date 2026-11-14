@@ -29,6 +29,44 @@ const SCHEMA = [
     analysis_key text
   )`,
   `CREATE INDEX IF NOT EXISTS scans_device_created_idx ON scans (device_id, created_at DESC)`,
+  // Full-text search over everything a scan says (title, answer, sections, web summary).
+  `ALTER TABLE scans ADD COLUMN IF NOT EXISTS search tsvector GENERATED ALWAYS AS (
+    setweight(to_tsvector('english', coalesce(title, '')), 'A') ||
+    setweight(to_tsvector('english', coalesce(spoken_text, '')), 'B') ||
+    setweight(to_tsvector('english', coalesce(jsonb_path_query_array(sections, '$[*].body')::text, '')), 'C') ||
+    setweight(to_tsvector('english',
+      coalesce(lookup->>'spokenText', '') || ' ' ||
+      coalesce(jsonb_path_query_array(lookup, '$.sections[*].body')::text, '')), 'D')
+  ) STORED`,
+  `CREATE INDEX IF NOT EXISTS scans_search_idx ON scans USING gin (search)`,
+  `CREATE INDEX IF NOT EXISTS scans_device_kind_idx ON scans (device_id, item_kind, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS scans_created_idx ON scans (created_at)`,
+  `CREATE INDEX IF NOT EXISTS lookup_cache_created_idx ON lookup_cache (created_at)`,
+  `CREATE INDEX IF NOT EXISTS analysis_cache_created_idx ON analysis_cache (created_at)`,
+  // Hat camera: events the phone polls for, per-hat state, and hat-to-phone pairing.
+  `CREATE TABLE IF NOT EXISTS device_events (
+    id bigserial PRIMARY KEY,
+    device_id text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    kind text NOT NULL CHECK (kind IN ('detected', 'answer', 'hint')),
+    payload jsonb NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS device_events_device_idx ON device_events (device_id, id)`,
+  `CREATE TABLE IF NOT EXISTS device_state (
+    device_id text PRIMARY KEY,
+    last_key text,
+    streak integer NOT NULL DEFAULT 0,
+    last_seen_key text,
+    last_read_key text,
+    last_read_at timestamptz,
+    last_hint_at timestamptz,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS device_pairs (
+    device_id text PRIMARY KEY,
+    phone_device text NOT NULL,
+    paired_at timestamptz NOT NULL DEFAULT now()
+  )`,
 ];
 
 if (!process.env.DATABASE_URL) {
@@ -38,6 +76,6 @@ if (!process.env.DATABASE_URL) {
 const sql = neon(process.env.DATABASE_URL);
 for (const statement of SCHEMA) await sql.query(statement);
 const tables = await sql`SELECT table_name FROM information_schema.tables
-  WHERE table_schema = 'public' AND table_name IN ('lookup_cache', 'analysis_cache', 'scans')
+  WHERE table_schema = 'public' AND table_name IN ('lookup_cache', 'analysis_cache', 'scans', 'device_events', 'device_state', 'device_pairs')
   ORDER BY table_name`;
 console.log("Ready:", tables.map((t) => t.table_name).join(", "));

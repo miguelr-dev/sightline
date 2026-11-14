@@ -117,6 +117,19 @@ export type HistoryScan = {
 };
 export type HistoryResponse = { scans: HistoryScan[] };
 
+export type AskRequest = {
+  question: string; // e.g. "What were the allergens on the cookies I scanned earlier?"
+  language?: string; // language name from LANGUAGES for the answer (default English)
+  timeZone?: string; // IANA zone for "today" and "yesterday" (default America/Los_Angeles)
+};
+
+export type AskResponse = {
+  spokenText: string; // short spoken answer
+  sections?: Section[]; // optional supporting detail
+  scans?: { id: string; title: string | null; createdAt: string }[]; // scans the answer is based on
+  error?: boolean;
+};
+
 export type FrameCheckRequest = {
   image: string; // base64 JPEG, about 512 px, no data: prefix
   mode: Mode;
@@ -141,4 +154,6 @@ export type Features = {
   transcribe: boolean; // ElevenLabs speech-to-text is configured
   lookup: boolean; // Bright Data web lookup is configured
   history: boolean; // Neon Postgres is configured (scan history and caches)
+  ask: boolean; // "Ask your history" agent is available (/api/ask)
+  hat: boolean; // hat camera routes are set up (DEVICE_SHARED_KEY and DATABASE_URL)
 };
