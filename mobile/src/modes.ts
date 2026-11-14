@@ -80,7 +80,15 @@ export type Features = {
 
 export const UNKNOWN_FEATURES: Features = { elevenlabs: null, transcribe: null, lookup: null, history: null };
 
-export type FrameCheck = { ready: boolean; key?: string; hint?: string };
+export type FrameCheck = {
+  ready: boolean;
+  key?: string;
+  hint?: string;
+  detected?: boolean; // something worth suggesting is in view
+  label?: string; // e.g. "Menu" or "Nutter Butter cookies"
+  suggestedMode?: string; // validated against MODES by the caller
+  confidence?: number; // 0..1
+};
 
 export type Voice = { id: string; name: string; description?: string; previewUrl?: string };
 

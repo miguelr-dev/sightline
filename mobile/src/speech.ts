@@ -38,7 +38,8 @@ function chunk(text: string, max: number, firstMax = max): string[] {
 }
 
 type Item = { text: string; lang: string };
-type Listener = (speaking: boolean) => void;
+// owner: who started the current speech (e.g. a section id), so its UI can show "speaking".
+type Listener = (speaking: boolean, owner: string | null) => void;
 
 class SpeechEngine {
   private run = 0;
@@ -49,6 +50,7 @@ class SpeechEngine {
   private cache = new Map<string, string>();
   private cooldownUntil = 0;
   private listeners = new Set<Listener>();
+  owner: string | null = null;
   rate = 1;
   natural = true; // user setting
   voiceId = ""; // "" = the server's default voice
@@ -70,14 +72,19 @@ class SpeechEngine {
   }
 
   private emit(v: boolean) {
-    this.listeners.forEach((l) => l(v));
+    if (!v) this.owner = null;
+    const owner = this.owner;
+    this.listeners.forEach((l) => l(v, owner));
   }
 
   /** Speak now, interrupting anything playing. With queue: true, play after what's playing. */
-  speak(text: string, lang = "en-US", opts: { queue?: boolean } = {}) {
+  speak(text: string, lang = "en-US", opts: { queue?: boolean; owner?: string } = {}) {
     const t = text.trim();
     if (!t) return;
-    if (!opts.queue) this.stop();
+    if (!opts.queue) {
+      this.stop();
+      this.owner = opts.owner ?? null;
+    }
     this.queue.push({ text: t, lang });
     if (!this.draining) void this.drain();
   }
@@ -112,8 +119,14 @@ class SpeechEngine {
     }
   }
 
+  /** Stop only if this owner started what's playing (e.g. collapsing the section being read). */
+  stopIfOwner(owner: string) {
+    if (this.owner === owner) this.stop();
+  }
+
   stop() {
     this.run++;
+    this.owner = null;
     this.queue = [];
     this.finish?.();
     this.finish = null;

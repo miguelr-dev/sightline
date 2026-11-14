@@ -11,6 +11,7 @@ export type Settings = {
   mode: Mode;
   language: string;
   autoCapture: boolean; // read automatically when the phone is held steady on something readable
+  autoOffByServer: boolean; // Auto was switched off because the server lacked /api/frame-check
   voiceId: string; // "" = the server's default voice
   deviceId: string; // random, made once; sent as x-sightline-device so the server can keep history
 };
@@ -25,6 +26,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mode: "describe",
   language: "Spanish",
   autoCapture: true,
+  autoOffByServer: false,
   voiceId: "",
   deviceId: "",
 };
@@ -68,7 +70,11 @@ function readSettings(): Settings {
     const raw =
       Platform.OS === "web" ? globalThis.localStorage?.getItem(KEY) ?? "" : file().exists ? file().textSync() : "";
     if (!raw) return DEFAULT_SETTINGS;
-    return { ...DEFAULT_SETTINGS, ...(JSON.parse(raw) as Partial<Settings>) };
+    const saved = JSON.parse(raw) as Partial<Settings>;
+    // Builds before autoOffByServer existed saved a plain "off" after a 404; treat that as a
+    // server switch-off so it gets re-checked instead of sticking forever.
+    const legacyOff = saved.autoCapture === false && saved.autoOffByServer === undefined;
+    return { ...DEFAULT_SETTINGS, ...saved, ...(legacyOff ? { autoOffByServer: true } : {}) };
   } catch {
     return DEFAULT_SETTINGS;
   }

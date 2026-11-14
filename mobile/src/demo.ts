@@ -19,6 +19,10 @@ const RESULT: AnalyzeResponse = {
     },
     { title: "Desserts", body: "Chocolate Lava Cake, $9.00\nLemon Sorbet (vegan, gluten free), $6.50" },
     { title: "Dietary notes", body: "V vegetarian, VG vegan, GF gluten free. The menu says to ask about allergens." },
+    {
+      title: "Full text",
+      body: "HARBOR TABLE\nLunch Menu, 11am to 3pm\n\nSTARTERS\nTomato Basil Soup (V), $7.50\nCrispy Calamari, $12.00\nCaesar Salad, $10.00\n\nMAINS\nGrilled Salmon, lemon butter, $24.00\nMushroom Risotto (V, GF), $18.00\nFish Tacos (spicy), $16.50\nClassic Cheeseburger, $15.00\n\nDESSERTS\nChocolate Lava Cake, $9.00\nLemon Sorbet (VG, GF), $6.50\n\nV vegetarian, VG vegan, GF gluten free. Ask about allergens.",
+    },
   ],
   webQuery: "Harbor Table restaurant menu hours reviews allergens",
   itemKind: "restaurant",
@@ -59,6 +63,7 @@ type Demo = {
   voices: Voice[] | null;
   hint: string | null;
   scans: Scan[] | null;
+  detection: { key: string; label: string; mode: Mode | null; confidence: number | null } | null;
 };
 
 const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
@@ -84,7 +89,8 @@ export function demoState(): Demo | null {
     mode: q === "translate" ? "translate" : "menu",
     photo,
     voices: VOICES,
-    hint: q === "home" ? "Move a little closer" : null,
+    hint: null,
+    detection: q === "home" ? { key: "harbor-table-menu", label: "Harbor Table menu", mode: "menu", confidence: 0.92 } : null,
     scans: [
       { id: "1", createdAt: ago(2), mode: "menu", itemKind: "restaurant", title: "Harbor Table lunch menu", spokenText: RESULT.spokenText, sections: RESULT.sections ?? [], lookup: LOOKUP(uri), image: uri },
       { id: "2", createdAt: ago(38), mode: "menu", itemKind: "medicine", title: "Ibuprofen 200 mg tablets", spokenText: "Ibuprofen 200 milligram tablets, 50 count.", sections: [], lookup: null },

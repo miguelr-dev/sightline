@@ -204,6 +204,11 @@ export async function frameCheck(req: {
       ready: r.data.ready,
       key: typeof r.data.key === "string" && r.data.key.trim() ? r.data.key.trim() : undefined,
       hint: typeof r.data.hint === "string" && r.data.hint.trim() ? r.data.hint.trim() : undefined,
+      detected: r.data.detected === true,
+      label: typeof r.data.label === "string" && r.data.label.trim() ? r.data.label.trim() : undefined,
+      suggestedMode: typeof r.data.suggestedMode === "string" ? r.data.suggestedMode : undefined,
+      confidence:
+        typeof r.data.confidence === "number" && Number.isFinite(r.data.confidence) ? r.data.confidence : undefined,
     },
   };
 }
@@ -296,4 +301,10 @@ export async function clearHistory(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** True when /api/frame-check exists (any status but 404/405, even a 400 for an empty body). */
+export async function frameCheckExists(): Promise<boolean> {
+  const r = await postJson<unknown>("/api/frame-check", {}, 6000);
+  return r.status > 0 && r.status !== 404 && r.status !== 405;
 }

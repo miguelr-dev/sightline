@@ -17,6 +17,7 @@ import {
   analyze,
   clearHistory,
   frameCheck,
+  frameCheckExists,
   getFeatures,
   getHistory,
   getVoices,
@@ -36,7 +37,8 @@ import { effectiveApiUrl, loadSettings, saveSettings, type Settings } from "./sr
 import { speech } from "./src/speech";
 import { colors, radius, type } from "./src/theme";
 import type { Photo, Shot } from "./src/types";
-import { useAutoCapture } from "./src/useAutoCapture";
+import { DetectionCard } from "./src/components/DetectionCard";
+import { useAutoCapture, type AutoDebug, type Detection } from "./src/useAutoCapture";
 
 // 1024 px at quality 0.6: in tests against the demo images this read exactly the same text as
 // 0.7, and the upload is about 17% smaller. 896 px saved little more and risks small print.
@@ -95,6 +97,11 @@ function Main() {
   const [pictureSize, setPictureSize] = useState<string | undefined>();
   const [cameraReady, setCameraReady] = useState(false);
   const [hint, setHint] = useState<string | null>(demo?.hint ?? null);
+  const [detection, setDetection] = useState<Detection | null>(demo?.detection ?? null);
+  const [showDebug, setShowDebug] = useState(false);
+  const [debug, setDebug] = useState<AutoDebug | null>(null);
+  const detectionRef = useRef<Detection | null>(detection);
+  const detectionHide = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [camPerm, requestCamPerm] = useCameraPermissions();
   const camera = useRef<CameraView>(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -151,6 +158,10 @@ function Main() {
     setConnection({ state: reachable ? "ok" : "down", features });
     if (demo) return;
     setVoices(list);
+    // A server without /api/frame-check once switched Auto off; switch it back on if it's there now.
+    if (reachable && live.current.settings.autoOffByServer && (await frameCheckExists())) {
+      setSettings((x) => ({ ...x, autoCapture: true, autoOffByServer: false }));
+    }
     // History: off when the server says so, else probe the route (404 = older server).
     setHistoryOn(features.history === false || !reachable ? false : (await getHistory(1)) !== null);
   }, []);
@@ -274,7 +285,7 @@ function Main() {
   );
 
   const start = useCallback(
-    async (getPhoto: () => Promise<Photo | null>, opts: { auto?: boolean } = {}) => {
+    async (getPhoto: () => Promise<Photo | null>, opts: { auto?: boolean; mode?: Mode } = {}) => {
       if (busyRef.current) return;
       setBusyBoth(true);
       silence(); // a new read always cuts off the previous one
@@ -283,7 +294,9 @@ function Main() {
       else haptic.capture();
       const id = nextId.current++;
       const { settings: s } = live.current;
-      const fresh: Shot = { id, photo: null, mode: s.mode, language: s.language, followUps: [], web: { status: "idle" } };
+      const mode = opts.mode ?? s.mode;
+      if (opts.mode && opts.mode !== s.mode) setSettings((x) => ({ ...x, mode }));
+      const fresh: Shot = { id, photo: null, mode, language: s.language, followUps: [], web: { status: "idle" } };
       try {
         const photo = await getPhoto();
         if (!photo) {
@@ -329,11 +342,14 @@ function Main() {
       const { settings: s } = live.current;
       return frameCheck({ image, mode: s.mode, ...(s.mode === "translate" ? { language: s.language } : {}) });
     },
-    onReady: () => {
+    onReady: (mode) => {
       // Never start over speech that's still winding down from a previous result.
       if (busyRef.current || sheetRef.current !== "none" || Date.now() - quietSince.current < QUIET_BEFORE_AUTO_MS) return;
-      void start(capturePhoto(false), { auto: true });
+      showDetection(null, true);
+      void start(capturePhoto(false), { auto: true, mode: mode ?? undefined });
     },
+    onDetect: (d) => showDetection(d),
+    onDebug: showDebug ? setDebug : undefined,
     onHint: (text) => {
       if (busyRef.current || sheetRef.current !== "none") return; // never over a result
       setHint(text);
@@ -341,11 +357,62 @@ function Main() {
       if (s.autoSpeak) speech.hint(text);
       else if (sr) AccessibilityInfo.announceForAccessibility(text);
     },
-    onUnavailable: () => update({ autoCapture: false }), // older server: turn Auto off quietly
+    onUnavailable: () => update({ autoCapture: false, autoOffByServer: true }), // older server: off, quietly
   });
   useEffect(() => {
-    if (!autoEnabled && !demo) setHint(null);
+    if (autoEnabled || demo) return;
+    setHint(null);
+    showDetection(null, true);
   }, [autoEnabled]);
+
+  // Suggestion card. Appears (with a light haptic and a VoiceOver announcement, never TTS) when
+  // frame-check detects something; stays while it's detected; fades about 2 s after it's gone.
+  function showDetection(d: Detection | null, now = false) {
+    if (!d) {
+      if (now) {
+        if (detectionHide.current) clearTimeout(detectionHide.current);
+        detectionHide.current = null;
+        detectionRef.current = null;
+        setDetection(null);
+      } else if (detectionRef.current && !detectionHide.current) {
+        detectionHide.current = setTimeout(() => {
+          detectionHide.current = null;
+          detectionRef.current = null;
+          setDetection(null);
+        }, 2000);
+      }
+      return;
+    }
+    if (detectionHide.current) clearTimeout(detectionHide.current);
+    detectionHide.current = null;
+    const prev = detectionRef.current;
+    detectionRef.current = d;
+    setDetection(d);
+    if (prev && prev.key === d.key && prev.label === d.label) return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    // Point the mode chips at the suggestion so a manual Capture uses it too.
+    if (d.mode && d.mode !== live.current.settings.mode) setSettings((x) => ({ ...x, mode: d.mode! }));
+    if (live.current.screenReader) AccessibilityInfo.announceForAccessibility(`${d.label} detected. Double-tap the card to read.`);
+  }
+
+  const readDetection = () => {
+    const d = detectionRef.current;
+    if (!d) return;
+    auto.markRead(d.key);
+    showDetection(null, true);
+    void start(capturePhoto(true), { mode: d.mode ?? undefined });
+  };
+
+  const pausedReasons = [
+    !settings.autoCapture && "Auto off",
+    !appActive && "app inactive",
+    !cameraReady && "camera not ready",
+    !camPerm?.granted && "no camera permission",
+    sheet !== "none" && `sheet: ${sheet}`,
+    busy && "busy",
+    speaking && "speaking",
+    recording && "recording",
+  ].filter(Boolean) as string[];
 
   // Full-quality frame for a read. The shutter sound is the cue on a manual tap; auto reads use
   // the haptic tick instead.
@@ -538,7 +605,7 @@ function Main() {
   const toggleAuto = () => {
     haptic.tick();
     const next = !settings.autoCapture;
-    update({ autoCapture: next });
+    update({ autoCapture: next, autoOffByServer: false });
     if (live.current.screenReader) AccessibilityInfo.announceForAccessibility(next ? "Auto on" : "Auto off");
   };
 
@@ -600,6 +667,11 @@ function Main() {
         <View style={s.topRight}>
           <Pressable
             onPress={toggleAuto}
+            onLongPress={() => {
+              haptic.tick();
+              setShowDebug((v) => !v);
+            }}
+            delayLongPress={600}
             accessibilityRole="switch"
             accessibilityLabel="Auto capture"
             accessibilityHint="Reads automatically when you hold the phone steady on something"
@@ -634,7 +706,23 @@ function Main() {
           </IconButton>
         </View>
       </View>
-      {hint && (connection.state !== "down" || demo) ? (
+      {showDebug ? (
+        <View style={[s.debug, { top: insets.top + 60 }]} accessible accessibilityLabel="Auto capture debug readout">
+          <Text style={s.debugText}>
+            {[
+              `auto: ${autoEnabled ? "running" : `paused (${pausedReasons.join(", ") || "?"})`}`,
+              `motion: ${debug?.motion ?? "-"}  steady: ${debug ? (debug.steady ? `yes ${debug.steadyMs}ms` : "no") : "-"}`,
+              `rot ${debug?.rot.toFixed(1) ?? "-"} deg/s  acc ${debug?.acc.toFixed(2) ?? "-"} m/s2`,
+              `checks: ${debug?.checks ?? 0}${debug?.inFlight ? " (in flight)" : ""}  last: ${debug?.lastMs ?? 0}ms${
+                debug?.lastAt ? `, ${Math.round((Date.now() - debug.lastAt) / 1000)}s ago` : ""
+              }`,
+              `result: ${debug?.last ?? "-"}`,
+              `server: ${effectiveApiUrl(settings)}`,
+            ].join("\n")}
+          </Text>
+        </View>
+      ) : null}
+      {hint && !detection && (connection.state !== "down" || demo) ? (
         <View style={[s.banner, { top: insets.top + 64 }]} accessible accessibilityLabel={hint}>
           <Icon sf="viewfinder" ion="scan-outline" size={18} />
           <Text style={[type.subhead, { color: colors.label, fontWeight: "600", flexShrink: 1 }]}>{hint}</Text>
@@ -673,7 +761,9 @@ function Main() {
           </Pressable>
         ) : null}
 
-        {last && sheet === "none" ? (
+        <DetectionCard detection={sheet === "none" ? detection : null} reduceMotion={reduceMotion} onPress={readDetection} />
+
+        {last && sheet === "none" && !detection ? (
           <Pressable
             onPress={() => setSheet("result")}
             accessibilityRole="button"
@@ -793,6 +883,15 @@ const s = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
+  debug: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.94)",
+  },
+  debugText: { fontFamily: Platform.select({ ios: "Menlo", default: "monospace" }), fontSize: 12, lineHeight: 17, color: colors.label },
   topRight: { flexDirection: "row", alignItems: "center", gap: 10 },
   autoPill: {
     flexDirection: "row",

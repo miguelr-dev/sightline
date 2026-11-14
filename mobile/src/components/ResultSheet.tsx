@@ -14,7 +14,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { MODE_LABELS, type AnalyzeResponse, type LookupSource, type Section } from "../modes";
+import { languageCode, MODE_LABELS, type AnalyzeResponse, type LookupSource, type Section } from "../modes";
 import { RATES } from "../settings";
 import { colors, MIN_TARGET, radius, type } from "../theme";
 import type { Shot } from "../types";
@@ -61,6 +61,7 @@ export function ResultSheet(p: Props) {
   const r = shot?.result;
   const looking = !!shot && !r;
   const askBusy = !!shot?.followUps.some((f) => !f.answer);
+  const lang = shot?.mode === "translate" ? languageCode(shot.language) : "en-US";
 
   const send = () => {
     const q = question.trim();
@@ -175,7 +176,7 @@ export function ResultSheet(p: Props) {
                   />
                 </View>
 
-                <SectionList key={`r-${shot!.id}`} sections={sectionsOf(r)} reduceMotion={p.reduceMotion} />
+                <SectionList key={`r-${shot!.id}`} idPrefix={`r-${shot!.id}`} lang={lang} sections={sectionsOf(r)} reduceMotion={p.reduceMotion} />
 
                 {shot!.followUps.map((f) => (
                   <View key={f.id} style={s.section}>
@@ -187,7 +188,7 @@ export function ResultSheet(p: Props) {
                         <Text style={type.body} selectable>
                           {f.answer.spokenText}
                         </Text>
-                        <SectionList sections={sectionsOf(f.answer)} reduceMotion={p.reduceMotion} />
+                        <SectionList idPrefix={`f-${shot!.id}-${f.id}`} lang={lang} sections={sectionsOf(f.answer)} reduceMotion={p.reduceMotion} />
                       </>
                     ) : (
                       <View style={s.inline} accessible accessibilityLabel="Thinking">
@@ -311,7 +312,7 @@ function WebCard({
           <Text style={type.body} selectable>
             {w.data.spokenText.replace(/^From the web:\s*/i, "")}
           </Text>
-          <SectionList key={`w-${shot.id}`} sections={w.data.sections ?? []} reduceMotion={reduceMotion} inset />
+          <SectionList key={`w-${shot.id}`} idPrefix={`w-${shot.id}`} sections={w.data.sections ?? []} reduceMotion={reduceMotion} inset />
           {w.data.sources.length ? (
             <View style={{ marginTop: 4 }}>
               <Text style={[type.footnote, { fontWeight: "600", marginBottom: 2 }]}>Sources</Text>

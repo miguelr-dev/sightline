@@ -110,7 +110,7 @@ export function SettingsSheet({
               <Row label="Auto capture" hint="Hold the phone steady on something and SightLine reads it without a tap.">
                 <Switch
                   value={settings.autoCapture}
-                  onValueChange={(v) => onChange({ autoCapture: v })}
+                  onValueChange={(v) => onChange({ autoCapture: v, autoOffByServer: false })}
                   accessibilityLabel="Auto capture"
                   trackColor={{ true: colors.primary, false: colors.hairline }}
                   thumbColor={colors.bg}
