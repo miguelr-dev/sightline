@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "SightLine",
+    "slug": "sightline",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.sightline.mobile"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#FFFFFF",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "SightLine uses the camera to see what's in front of you and describe it aloud."
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "SightLine uses the microphone so you can ask questions about a photo by voice."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "SightLine can describe a photo you pick from your library."
+        }
+      ],
+      "expo-image",
+      "expo-asset",
+      "expo-font"
+    ]
+  }
+}

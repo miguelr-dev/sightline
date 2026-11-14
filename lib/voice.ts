@@ -80,6 +80,7 @@ export type Command =
   | { type: "repeat" }
   | { type: "capture"; mode: Mode; language?: string }
   | { type: "question"; text: string }
+  | { type: "lookup" }
   | { type: "help" };
 
 const LANGUAGE_NAMES = LANGUAGES.map((l) => l.name.toLowerCase()).join("|");
@@ -90,6 +91,11 @@ export function parseCommand(raw: string): Command {
   if (/^(stop|quiet|be quiet|silence|shut up|pause)\b/.test(t)) return { type: "stop" };
   if (/\b(repeat|say (that|it) again|again|replay)\b/.test(t)) return { type: "repeat" };
   if (/^(help|what can i say|commands)\b/.test(t)) return { type: "help" };
+  if (
+    /\b(look (it|this|that) up|look up|search (the )?(web|internet|online)|search (for )?(it|this|that)|check (the )?(web|internet|online)|google (it|this|that)|(any|check for) recalls?|(is|was) (it|this|that) recalled|web lookup)\b/.test(t)
+  ) {
+    return { type: "lookup" };
+  }
 
   const tr = t.match(new RegExp(`translate(?: (?:this|it|that))?(?: (?:in)?to (${LANGUAGE_NAMES}))?`));
   if (tr) {

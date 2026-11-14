@@ -8,23 +8,31 @@ import {
   LANGUAGES,
   findLanguage,
   type AnalyzeResponse,
+  type Features,
+  type LookupResponse,
   type Mode,
+  type Section,
 } from "@/lib/modes";
 import { captureVideoFrame, fileToBase64 } from "@/lib/image";
 import { beepDone, beepError, beepStart, unlockAudio, vibrate } from "@/lib/feedback";
-import { useSpeech } from "@/lib/useSpeech";
+import { useSpeech, type SpeakOptions } from "@/lib/useSpeech";
 import { listenOnce, parseCommand, recognitionSupported, type Listener } from "@/lib/voice";
+import { recordOnce, recorderSupported } from "@/lib/recorder";
 
 const INTRO =
   "Welcome to SightLine. Point your camera at something and tap Capture at the bottom of the screen, and I'll tell you what's there.";
 const HELP =
-  "You can say: read this, describe, what's on the menu, translate to Spanish, repeat, or stop. Or ask a question about the last photo.";
+  "You can say: read this, describe, what's on the menu, translate to Spanish, look it up, repeat, or stop. Or ask a question about the last photo.";
 const SPEEDS = [0.75, 1, 1.25, 1.5] as const;
 const MIN_GAP_MS = 1500; // ignore accidental double captures
 const REQUEST_TIMEOUT_MS = 45_000;
+const LOOKUP_TIMEOUT_MS = 20_000; // the server stops itself at about 15 seconds
 
 type CameraState = "off" | "starting" | "on" | "unavailable";
 type Result = AnalyzeResponse & { mode: Mode; langCode: string; question?: string };
+type WebState =
+  | { status: "loading"; query: string }
+  | { status: "done"; data: LookupResponse };
 
 function readPref<T>(key: string, fallback: T): T {
   try {
@@ -34,6 +42,20 @@ function readPref<T>(key: string, fallback: T): T {
     return fallback;
   }
 }
+/** A random ID for this browser, sent as x-sightline-device so the server can keep its history. */
+function deviceHeader(): Record<string, string> {
+  try {
+    let id = localStorage.getItem("sl.device");
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem("sl.device", id);
+    }
+    return { "x-sightline-device": id };
+  } catch {
+    return {}; // storage blocked: no history, everything else still works
+  }
+}
+
 function writePref(key: string, value: unknown) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
@@ -50,6 +72,25 @@ const btn =
 const btnDark = `${btn} border-white bg-black text-white hover:bg-neutral-800`;
 const btnOn = `${btn} border-[var(--accent)] bg-[var(--accent)] text-black`;
 
+/** Item-dependent detail sections, or the flat details text from older responses. */
+function Sections({ sections, fallback }: { sections?: Section[]; fallback?: string }) {
+  if (sections?.length) {
+    return (
+      <div className="mt-2 flex flex-col gap-3">
+        {sections.map((s, i) => (
+          <div key={`${i}-${s.title}`}>
+            <h3 className="text-lg font-bold">{s.title}</h3>
+            <p className="whitespace-pre-wrap text-lg leading-relaxed">{s.body}</p>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return fallback ? (
+    <p className="mt-2 whitespace-pre-wrap text-lg leading-relaxed">{fallback}</p>
+  ) : null;
+}
+
 export default function SightLine() {
   const [started, setStarted] = useState(false);
   const [camera, setCamera] = useState<CameraState>("off");
@@ -64,6 +105,10 @@ export default function SightLine() {
   const [listening, setListening] = useState<null | "command" | "question">(null);
   const [canListen, setCanListen] = useState(false);
   const [question, setQuestion] = useState("");
+  const [features, setFeatures] = useState<Features | null>(null);
+  const [web, setWeb] = useState<WebState | null>(null);
+  const [webLang, setWebLang] = useState("en-US"); // voice language for the web summary
+  const [recording, setRecording] = useState(false); // voice input via ElevenLabs Scribe
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -71,15 +116,22 @@ export default function SightLine() {
   const busyRef = useRef(false);
   const lastSendRef = useRef(0);
   const listenerRef = useRef<Listener | null>(null);
+  const lookupIdRef = useRef(0);
 
   const speech = useSpeech();
-  const { speak, stop: stopSpeech, setRate } = speech;
+  const { speak, stop: stopSpeech, setRate, unlock: unlockSpeech, setElevenAvailable } = speech;
 
   // Latest state for async callbacks (voice results, fetch completions).
-  const latest = useRef({ mode, language, autoSpeak, result, lastImage, camera });
+  const latest = useRef({ mode, language, autoSpeak, result, lastImage, camera, features, web, webLang });
   useEffect(() => {
-    latest.current = { mode, language, autoSpeak, result, lastImage, camera };
+    latest.current = { mode, language, autoSpeak, result, lastImage, camera, features, web, webLang };
   });
+
+  /** Call from every tap: unlocks beeps and speech audio (iOS Safari needs a gesture). */
+  const unlockAll = useCallback(() => {
+    unlockAudio();
+    unlockSpeech();
+  }, [unlockSpeech]);
 
   // Load saved preferences after mount so server and client render the same HTML.
   useEffect(() => {
@@ -93,12 +145,117 @@ export default function SightLine() {
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [setRate]);
 
+  // Ask the server which optional integrations (ElevenLabs, Bright Data) are configured.
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/features")
+      .then((r) => (r.ok ? (r.json() as Promise<Features>) : null))
+      .then((f) => {
+        if (!alive || !f) return;
+        setFeatures(f);
+        setElevenAvailable(f.elevenlabs);
+        if (f.transcribe && recorderSupported()) setCanListen(true);
+      })
+      .catch(() => {
+        // Offline or older server: the browser voice and no web lookup.
+      });
+    return () => {
+      alive = false;
+    };
+  }, [setElevenAvailable]);
+
   /** Speak if auto-speak is on. Screen reader users can turn it off and rely on the live region. */
   const say = useCallback(
-    (text: string, lang = "en-US") => {
-      if (latest.current.autoSpeak) speak(text, lang);
+    (text: string, lang = "en-US", opts?: SpeakOptions) => {
+      if (latest.current.autoSpeak) speak(text, lang, opts);
     },
     [speak],
+  );
+
+  // ---------- Web lookup (Bright Data SERP API + Claude summary) ----------
+  const runLookup = useCallback(
+    async (opts: { auto: boolean; result?: Result }) => {
+      // The fresh result is passed in right after a capture, before `latest` has caught up.
+      const r = opts.result ?? latest.current.result;
+      if (!r || r.error) {
+        if (!opts.auto) {
+          const msg = "Take a photo first, then I can look it up on the web.";
+          setStatus(msg);
+          say(msg);
+        }
+        return;
+      }
+      if (!latest.current.features?.lookup) {
+        if (!opts.auto) {
+          const msg = "Web lookup isn't set up on this server.";
+          beepError();
+          setStatus(msg);
+          say(msg);
+        }
+        return;
+      }
+      const id = ++lookupIdRef.current;
+      const query = r.webQuery ?? "";
+      setWeb({ status: "loading", query });
+      if (!opts.auto) {
+        beepStart();
+        vibrate(50);
+        say("Checking the web.");
+      }
+
+      let data: LookupResponse;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), LOOKUP_TIMEOUT_MS);
+      try {
+        const res = await fetch("/api/lookup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...deviceHeader() },
+          body: JSON.stringify({
+            query,
+            scanId: r.scanId,
+            itemKind: r.itemKind,
+            // Translate mode: the web summary comes back in the chosen language.
+            language: r.mode === "translate" ? latest.current.language : "English",
+            context: { mode: r.mode, spokenText: r.spokenText, details: r.details },
+          }),
+          signal: controller.signal,
+        });
+        data = (await res.json()) as LookupResponse;
+        if (!res.ok) data.error = true;
+      } catch (e) {
+        data = {
+          spokenText:
+            e instanceof DOMException && e.name === "AbortError"
+              ? "The web lookup took too long, so I stopped it."
+              : "I couldn't reach the web just now.",
+          details: "",
+          query,
+          sources: [],
+          error: true,
+        };
+      } finally {
+        clearTimeout(timer);
+      }
+      if (id !== lookupIdRef.current) return; // a newer photo or lookup replaced this one
+
+      if (data.skipped && (opts.auto || !data.spokenText)) {
+        setWeb(null); // nothing to search for: stay quiet after an automatic lookup
+        return;
+      }
+      setWeb({ status: "done", data });
+      if (data.error) {
+        beepError();
+        vibrate([120, 60, 120]);
+      } else {
+        if (!opts.auto) beepDone(); // don't beep over the first answer
+        vibrate([40, 40, 40]);
+      }
+      // Wait for the first answer (or "Checking the web") to finish, then speak this.
+      const webLang = r.mode === "translate" && !data.error ? r.langCode : "en-US";
+      setWebLang(webLang);
+      say(data.spokenText, webLang, { queue: true });
+    },
+    [say],
   );
 
   // ---------- Camera ----------
@@ -154,6 +311,8 @@ export default function SightLine() {
       setBusy(true);
 
       stopSpeech();
+      lookupIdRef.current++; // drop any web lookup for the previous photo
+      setWeb(null);
       beepStart();
       vibrate(50);
       const looking = opts.question ? "Thinking…" : "Looking…";
@@ -171,7 +330,7 @@ export default function SightLine() {
       try {
         const res = await fetch("/api/analyze", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...deviceHeader() },
           body: JSON.stringify({ image, ...opts }),
           signal: controller.signal,
         });
@@ -191,7 +350,8 @@ export default function SightLine() {
       }
 
       const speakLang = data.error ? "en-US" : langCode;
-      setResult({ ...data, mode: opts.mode, langCode: speakLang, question: opts.question });
+      const fresh: Result = { ...data, mode: opts.mode, langCode: speakLang, question: opts.question };
+      setResult(fresh);
       setStatus("");
       if (data.error) {
         beepError();
@@ -204,13 +364,26 @@ export default function SightLine() {
 
       busyRef.current = false;
       setBusy(false);
+
+      // When the photo shows a specific product, medicine, restaurant, book or place, look it up
+      // on the web (recalls, nutrition, reviews, hours). Runs after the first answer is out,
+      // so it never delays it.
+      if (
+        !data.error &&
+        !opts.question &&
+        data.webQuery &&
+        data.itemKind &&
+        data.itemKind !== "none"
+      ) {
+        void runLookup({ auto: true, result: fresh });
+      }
     },
-    [say, stopSpeech],
+    [runLookup, say, stopSpeech],
   );
 
   const capture = useCallback(
     (override?: { mode?: Mode; language?: string }) => {
-      unlockAudio();
+      unlockAll();
       if (busyRef.current) return;
       const m = override?.mode ?? latest.current.mode;
       const lang = override?.language ?? latest.current.language;
@@ -233,13 +406,13 @@ export default function SightLine() {
       setLastImage(image);
       void analyze(image, { mode: m, language: lang });
     },
-    [analyze, say],
+    [analyze, say, unlockAll],
   );
 
   const onFile = useCallback(
     async (file: File | undefined) => {
       if (!file) return;
-      unlockAudio();
+      unlockAll();
       try {
         const image = await fileToBase64(file);
         setLastImage(image);
@@ -250,7 +423,7 @@ export default function SightLine() {
         say(msg);
       }
     },
-    [analyze, say],
+    [analyze, say, unlockAll],
   );
 
   const ask = useCallback(
@@ -276,7 +449,12 @@ export default function SightLine() {
 
   const replay = useCallback(() => {
     const r = latest.current.result;
-    if (r) speak(r.spokenText, r.langCode);
+    if (!r) return;
+    speak(r.spokenText, r.langCode);
+    const w = latest.current.web;
+    if (w?.status === "done" && !w.data.error) {
+      speak(w.data.spokenText, latest.current.webLang, { queue: true });
+    }
   }, [speak]);
 
   // ---------- Voice ----------
@@ -309,6 +487,9 @@ export default function SightLine() {
           setStatus(HELP);
           say(HELP);
           return;
+        case "lookup":
+          void runLookup({ auto: false });
+          return;
         case "capture":
           setMode(cmd.mode);
           if (cmd.language) chooseLanguage(cmd.language);
@@ -323,12 +504,12 @@ export default function SightLine() {
           }
       }
     },
-    [ask, capture, chooseLanguage, replay, say, stopSpeech],
+    [ask, capture, chooseLanguage, replay, runLookup, say, stopSpeech],
   );
 
   const listen = useCallback(
     (kind: "command" | "question") => {
-      unlockAudio();
+      unlockAll();
       if (listenerRef.current) {
         listenerRef.current.stop();
         listenerRef.current = null;
@@ -339,28 +520,43 @@ export default function SightLine() {
       setStatus(kind === "command" ? "Listening for a command…" : "Listening for your question…");
       vibrate(30);
       setListening(kind);
-      listenerRef.current = listenOnce({
-        onResult: (text) => {
+      const handlers = {
+        onResult: (text: string) => {
           setStatus(`Heard: ${text}`);
           if (kind === "command") handleCommand(text);
           else ask(text);
         },
-        onError: (reason) => {
+        onError: (reason: string) => {
           const msg =
             reason === "not-allowed" || reason === "service-not-allowed"
               ? "Microphone access is blocked. You can type your question instead."
-              : "I didn't hear anything. Tap the button and try again.";
+              : reason === "network"
+                ? "I couldn't make out what you said just now. Please try again."
+                : "I didn't hear anything. Tap the button and try again.";
           setStatus(msg);
           say(msg);
         },
         onEnd: () => {
           listenerRef.current = null;
           setListening(null);
+          setRecording(false);
         },
-      });
+      };
+      if (recognitionSupported()) {
+        listenerRef.current = listenOnce(handlers);
+      } else if (latest.current.features?.transcribe && recorderSupported()) {
+        // No SpeechRecognition (e.g. iOS home-screen app): record and transcribe with ElevenLabs.
+        setRecording(true);
+        listenerRef.current = recordOnce({
+          ...handlers,
+          onTranscribing: () => setStatus("Got it. Working out what you said…"),
+        });
+      } else {
+        listenerRef.current = null;
+      }
       if (!listenerRef.current) setListening(null);
     },
-    [ask, handleCommand, say, stopSpeech],
+    [ask, handleCommand, say, stopSpeech, unlockAll],
   );
 
   // ---------- Settings ----------
@@ -380,7 +576,7 @@ export default function SightLine() {
   };
 
   const begin = () => {
-    unlockAudio();
+    unlockAll();
     setStarted(true);
     speak(INTRO);
     void startCamera();
@@ -401,7 +597,9 @@ export default function SightLine() {
           </p>
           <p className="text-lg leading-relaxed text-[var(--muted)]">
             When you tap Start, your browser will ask to use the camera. Each photo is sent to an AI
-            model to be described. SightLine doesn&apos;t save your photos.
+            model to be described, and product or restaurant names may be searched on the web.
+            SightLine never saves your photos. It keeps the text of recent answers so you can look
+            back at them.
           </p>
         </div>
         <button type="button" onClick={begin} className={`${btnOn} min-h-24 text-2xl`}>
@@ -532,12 +730,68 @@ export default function SightLine() {
 
           {result?.details && !busy && (
             <details className="rounded-xl border-2 border-white/60 p-3">
-              <summary className="flex min-h-12 cursor-pointer items-center text-lg font-bold focus-visible:outline focus-visible:outline-4 focus-visible:outline-[var(--focus)]">
+              <summary className="flex min-h-16 cursor-pointer items-center text-lg font-bold focus-visible:outline focus-visible:outline-4 focus-visible:outline-[var(--focus)]">
                 More details
               </summary>
-              <p className="mt-2 whitespace-pre-wrap text-lg leading-relaxed">{result.details}</p>
+              <Sections sections={result.sections} fallback={result.details} />
             </details>
           )}
+
+          {/* Web lookup results get their own live region so the first answer isn't re-read. */}
+          <div aria-live="polite" aria-atomic="true" className="flex flex-col gap-2">
+            {!busy && web?.status === "loading" && (
+              <p className="flex items-center gap-3 border-t-2 border-white/60 pt-3 text-xl font-semibold">
+                <span
+                  aria-hidden="true"
+                  className="inline-block h-5 w-5 shrink-0 rounded-full border-4 border-white border-t-transparent motion-safe:animate-spin"
+                />
+                {web.query ? `Checking the web for ${web.query}…` : "Checking the web…"}
+              </p>
+            )}
+            {!busy && web?.status === "done" && (
+              <p
+                className="border-t-2 border-white/60 pt-3 text-2xl leading-snug font-semibold"
+                lang={webLang}
+              >
+                {web.data.error && <span className="font-extrabold">Error: </span>}
+                {web.data.spokenText}
+              </p>
+            )}
+          </div>
+
+          {!busy &&
+            web?.status === "done" &&
+            (web.data.details || web.data.sources.length > 0) && (
+              <details className="rounded-xl border-2 border-white/60 p-3">
+                <summary className="flex min-h-16 cursor-pointer items-center text-lg font-bold focus-visible:outline focus-visible:outline-4 focus-visible:outline-[var(--focus)]">
+                  Web details and sources
+                </summary>
+                {web.data.query && (
+                  <p className="mt-2 text-lg text-[var(--muted)]">Searched for: {web.data.query}</p>
+                )}
+                <Sections sections={web.data.sections} fallback={web.data.details} />
+                {web.data.sources.length > 0 && (
+                  <>
+                    <h3 className="mt-3 text-lg font-bold">Sources</h3>
+                    <ul className="mt-1 flex flex-col gap-1">
+                      {web.data.sources.map((src) => (
+                        <li key={src.url}>
+                          <a
+                            href={src.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex min-h-16 items-center break-words text-lg underline underline-offset-4 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus)]"
+                          >
+                            {src.title}
+                            <span className="sr-only"> (opens in a new tab)</span>
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </details>
+            )}
 
           {lastImage && (
             // eslint-disable-next-line @next/next/no-img-element -- in-memory data URL
@@ -552,13 +806,36 @@ export default function SightLine() {
         {result && (
           <section aria-label="Playback" className="flex shrink-0 flex-col gap-2 rounded-2xl bg-black/85 p-3">
             <div className="grid grid-cols-2 gap-2">
-              <button type="button" onClick={replay} className={btnDark} disabled={busy}>
+              <button
+                type="button"
+                onClick={() => {
+                  unlockAll();
+                  replay();
+                }}
+                className={btnDark}
+                disabled={busy}
+              >
                 <span aria-hidden="true">↻ </span>Replay
               </button>
               <button type="button" onClick={stopSpeech} className={btnDark}>
                 <span aria-hidden="true">■ </span>Stop
               </button>
             </div>
+            {features?.lookup && !result.error && (
+              <button
+                type="button"
+                onClick={() => {
+                  unlockAll();
+                  void runLookup({ auto: false });
+                }}
+                className={btnDark}
+                disabled={busy || web?.status === "loading"}
+                aria-busy={web?.status === "loading"}
+              >
+                <span aria-hidden="true">🌐 </span>
+                {web?.status === "loading" ? "Checking the web…" : "Look it up on the web"}
+              </button>
+            )}
             <div role="group" aria-labelledby="speed-label" className="flex items-center gap-2">
               <span id="speed-label" className="text-lg font-bold">
                 Speed
@@ -592,7 +869,11 @@ export default function SightLine() {
                 disabled={busy || listening === "command"}
               >
                 <span aria-hidden="true">🎤 </span>
-                {listening === "question" ? "Listening… tap to cancel" : "Ask about this"}
+                {listening === "question"
+                  ? recording
+                    ? "Listening… tap when done"
+                    : "Listening… tap to cancel"
+                  : "Ask about this"}
               </button>
             )}
             <form
@@ -641,7 +922,11 @@ export default function SightLine() {
                 disabled={busy || listening === "question"}
               >
                 <span aria-hidden="true">🎤 </span>
-                {listening === "command" ? "Listening…" : "Voice command"}
+                {listening === "command"
+                  ? recording
+                    ? "Listening… tap when done"
+                    : "Listening…"
+                  : "Voice command"}
               </button>
             )}
           </div>
