@@ -2,7 +2,6 @@ import Anthropic from "@anthropic-ai/sdk";
 import { MODES, LANGUAGES, type AnalyzeResponse, type Mode } from "@/lib/modes";
 import { systemPrompt, userPrompt } from "@/lib/prompts";
 
-export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const DEFAULT_MODEL = "claude-opus-5-5";

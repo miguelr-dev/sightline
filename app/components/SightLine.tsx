@@ -400,8 +400,8 @@ export default function SightLine() {
             translates signs, out loud.
           </p>
           <p className="text-lg leading-relaxed text-[var(--muted)]">
-            When you tap Start, your browser will ask to use the camera. Photos are sent to an AI
-            model to be described and are not stored.
+            When you tap Start, your browser will ask to use the camera. Each photo is sent to an AI
+            model to be described. SightLine doesn&apos;t save your photos.
           </p>
         </div>
         <button type="button" onClick={begin} className={`${btnOn} min-h-24 text-2xl`}>
@@ -417,10 +417,10 @@ export default function SightLine() {
       ? "Camera on"
       : camera === "starting"
         ? "Starting camera…"
-        : "Camera off: upload a photo instead";
+        : "Camera off";
 
   return (
-    <div className="relative min-h-dvh overflow-hidden bg-black">
+    <div className="relative h-dvh bg-black">
       {/* Live preview. Hidden from screen readers: it has no information they can use. */}
       <video
         ref={videoRef}
@@ -431,8 +431,8 @@ export default function SightLine() {
         aria-hidden="true"
       />
 
-      <div className="relative mx-auto flex min-h-dvh max-w-2xl flex-col gap-3 px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))]">
-        <header className="flex items-center justify-between gap-3 rounded-2xl bg-black/85 p-3">
+      <div className="relative mx-auto flex h-dvh max-w-2xl flex-col gap-3 px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))]">
+        <header className="flex shrink-0 items-center justify-between gap-3 rounded-2xl bg-black/85 p-3">
           <div>
             <h1 className="text-2xl font-extrabold">SightLine</h1>
             <p className="text-base text-[var(--muted)]">
@@ -444,13 +444,14 @@ export default function SightLine() {
             type="button"
             onClick={toggleAutoSpeak}
             aria-pressed={autoSpeak}
-            className={autoSpeak ? btnOn : btnDark}
+            className={`${autoSpeak ? btnOn : btnDark} whitespace-nowrap`}
           >
             Auto-speak: {autoSpeak ? "On" : "Off"}
           </button>
         </header>
 
-        <nav aria-label="Mode" className="rounded-2xl bg-black/85 p-3">
+        <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+        <nav aria-label="Mode" className="shrink-0 rounded-2xl bg-black/85 p-3">
           <h2 className="sr-only">Mode</h2>
           <div className="grid grid-cols-2 gap-2">
             {MODES.map((m) => {
@@ -462,7 +463,7 @@ export default function SightLine() {
                   aria-pressed={on}
                   aria-describedby={`hint-${m}`}
                   onClick={() => chooseMode(m)}
-                  className={`${on ? btnOn : btnDark} min-h-20 text-xl ${on ? "border-4" : ""}`}
+                  className={`${on ? btnOn : btnDark} text-xl ${on ? "border-4" : ""}`}
                 >
                   <span aria-hidden="true">{on ? "✓ " : ""}</span>
                   {MODE_LABELS[m]}
@@ -496,7 +497,7 @@ export default function SightLine() {
 
         <section
           aria-labelledby="result-heading"
-          className="flex min-h-40 flex-1 flex-col gap-3 overflow-y-auto rounded-2xl bg-black/90 p-4"
+          className="flex min-h-40 shrink-0 grow flex-col gap-3 rounded-2xl bg-black/90 p-4"
         >
           <h2 id="result-heading" className="text-lg font-bold text-[var(--muted)]">
             {result?.question ? `Answer to: “${result.question}”` : "Result"}
@@ -549,7 +550,7 @@ export default function SightLine() {
         </section>
 
         {result && (
-          <section aria-label="Playback" className="flex flex-col gap-2 rounded-2xl bg-black/85 p-3">
+          <section aria-label="Playback" className="flex shrink-0 flex-col gap-2 rounded-2xl bg-black/85 p-3">
             <div className="grid grid-cols-2 gap-2">
               <button type="button" onClick={replay} className={btnDark} disabled={busy}>
                 <span aria-hidden="true">↻ </span>Replay
@@ -581,7 +582,7 @@ export default function SightLine() {
         )}
 
         {lastImage && (
-          <section aria-label="Ask about this photo" className="flex flex-col gap-2 rounded-2xl bg-black/85 p-3">
+          <section aria-label="Ask about this photo" className="flex shrink-0 flex-col gap-2 rounded-2xl bg-black/85 p-3">
             {canListen && (
               <button
                 type="button"
@@ -619,7 +620,9 @@ export default function SightLine() {
           </section>
         )}
 
-        <div className="sticky bottom-0 flex flex-col gap-2 pb-[env(safe-area-inset-bottom)]">
+        </main>
+
+        <div className="flex shrink-0 flex-col gap-2 pb-[env(safe-area-inset-bottom)]">
           <div className={`grid gap-2 ${canListen ? "grid-cols-2" : "grid-cols-1"}`}>
             <button
               type="button"
@@ -658,7 +661,7 @@ export default function SightLine() {
             type="button"
             onClick={() => capture()}
             aria-busy={busy}
-            className={`${btnOn} min-h-28 text-3xl`}
+            className={`${btnOn} min-h-24 text-3xl`}
           >
             {busy ? "Working…" : `Capture`}
             <span className="block text-lg font-semibold">
