@@ -48,14 +48,19 @@
 .ichip{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:7px 11px;font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;line-height:1}
 .icirc{width:30px;height:30px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center}
 .ifloat{position:absolute;left:50%;transform:translateX(-50%);z-index:5;white-space:nowrap}
-.idetect{bottom:150px;display:flex;align-items:center;gap:8px;border-radius:18px;padding:7px 8px 7px 10px;animation:pop .4s cubic-bezier(.2,.7,.1,1) both;transition:transform .15s ease}
+.idetect{bottom:172px;display:flex;align-items:center;gap:8px;border-radius:18px;padding:7px 8px 7px 10px;animation:pop .4s cubic-bezier(.2,.7,.1,1) both;transition:transform .15s ease}
 .idetect.pressed{transform:translateX(-50%) scale(.94)}
 .idetect b{display:block;font-size:11.5px;line-height:1.2}
 .idetect small{display:block;font-size:9.5px;color:#3A3A3C}
 .idetect .x{width:20px;height:20px;border-radius:50%;background:rgba(0,0,0,.08);display:flex;align-items:center;justify-content:center;font-size:11px;margin-left:4px}
 @keyframes pop{from{opacity:0;transform:translate(-50%,10px)}to{opacity:1;transform:translate(-50%,0)}}
-.istatus{bottom:150px;display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:6px 11px;font-size:11px;font-weight:600}
-.ilang{bottom:116px;display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:5px 11px;font-size:11px;font-weight:600}
+.istatus{bottom:172px;display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:6px 11px;font-size:11px;font-weight:600}
+.ilang{bottom:142px;display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:5px 11px;font-size:11px;font-weight:600}
+.izoom{position:absolute;left:50%;bottom:106px;transform:translateX(-50%);z-index:5;display:flex;gap:2px;padding:2px;border-radius:999px;background:rgba(0,0,0,.45);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
+.izoom span{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:800;color:#fff}
+.izoom span.on{background:#fff;color:#000}
+.iph{position:relative;display:block;flex:none}
+.imag{position:absolute;right:7px;bottom:7px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;display:flex;align-items:center;justify-content:center}
 .istrip{position:absolute;left:0;right:0;bottom:84px;z-index:5;display:flex;justify-content:center;gap:9px}
 .istrip span{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:9.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#fff}
 .istrip span i{display:block;width:14px;height:2px;border-radius:2px;background:transparent}
@@ -89,6 +94,11 @@
 @keyframes slideup{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
 .vf{position:absolute;left:7%;right:7%;top:15%;bottom:33%;z-index:4;pointer-events:none;transition:all .8s cubic-bezier(.2,.7,.1,1)}
 .vf.locking{left:3%;right:3%;top:11%;bottom:28%;opacity:.4}
+/* Detected: the corners glide onto the menu board and turn yellow, like the app's tracking brackets */
+.vf.track{left:5.5%;right:.5%;top:22%;bottom:26%;animation:vftrack .55s cubic-bezier(.2,.7,.1,1) both}
+.vf.track i{border-color:#FFD60A;filter:drop-shadow(0 0 2px rgba(0,0,0,.6));animation:vfyellow .55s ease both;animation-delay:inherit}
+@keyframes vftrack{from{left:7%;right:7%;top:15%;bottom:33%}}
+@keyframes vfyellow{from{border-color:#fff}}
 .vf i{position:absolute;width:26px;height:26px;border-color:#fff;border-style:solid}
 .vf i:nth-child(1){left:0;top:0;border-width:3px 0 0 3px;border-radius:8px 0 0 0}
 .vf i:nth-child(2){right:0;top:0;border-width:3px 3px 0 0;border-radius:0 8px 0 0}
