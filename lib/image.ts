@@ -7,8 +7,9 @@ function toJpegBase64(
   source: CanvasImageSource,
   width: number,
   height: number,
+  maxSide = MAX_SIDE,
 ): string {
-  const scale = Math.min(1, MAX_SIDE / Math.max(width, height));
+  const scale = Math.min(1, maxSide / Math.max(width, height));
   const w = Math.round(width * scale);
   const h = Math.round(height * scale);
   const canvas = document.createElement("canvas");
@@ -21,11 +22,12 @@ function toJpegBase64(
   return dataUrl.slice(dataUrl.indexOf(",") + 1);
 }
 
-export function captureVideoFrame(video: HTMLVideoElement, frame?: DOMRect | null): string {
+/** `maxSide` 512 gives the small, silent frames Detect sends to /api/frame-check. */
+export function captureVideoFrame(video: HTMLVideoElement, frame?: DOMRect | null, maxSide = MAX_SIDE): string {
   if (!video.videoWidth || !video.videoHeight) {
     throw new Error("The camera isn't ready yet");
   }
-  if (!frame) return toJpegBase64(video, video.videoWidth, video.videoHeight);
+  if (!frame) return toJpegBase64(video, video.videoWidth, video.videoHeight, maxSide);
 
   // Crop to the on-screen viewfinder so the photo matches the camera corners. The video is shown
   // with object-fit: cover, so map screen pixels back to video pixels through that scale and offset.
@@ -37,9 +39,9 @@ export function captureVideoFrame(video: HTMLVideoElement, frame?: DOMRect | nul
   const sy = Math.max(0, (frame.top - offY) / scale);
   const sw = Math.min(video.videoWidth - sx, frame.width / scale);
   const sh = Math.min(video.videoHeight - sy, frame.height / scale);
-  if (sw < 32 || sh < 32) return toJpegBase64(video, video.videoWidth, video.videoHeight);
+  if (sw < 32 || sh < 32) return toJpegBase64(video, video.videoWidth, video.videoHeight, maxSide);
 
-  const out = Math.min(1, MAX_SIDE / Math.max(sw, sh));
+  const out = Math.min(1, maxSide / Math.max(sw, sh));
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(sw * out);
   canvas.height = Math.round(sh * out);
