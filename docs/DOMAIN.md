@@ -1,5 +1,7 @@
 # Custom domain: sightline.study
 
+> **Status, 15 Nov 10:00 AM:** Porkbun DNS is done. The two default parking records were edited to point at Vercel: **ALIAS `sightline.study` → `cname.vercel-dns.com`** and **CNAME `*.sightline.study` → `cname.vercel-dns.com`**, and both resolve to Vercel IPs. **Remaining:** the Vercel project owner adds `sightline.study` and `www.sightline.study` under Settings → Domains (step 1). Until then, https://sightline.study fails with no certificate.
+
 We own **sightline.study**, registered at Porkbun on 14 Nov 2026. Porkbun handles its DNS (nameservers `curitiba`, `fortaleza`, `maceio` and `salvador.ns.porkbun.com`). The live site is still at https://sightline-theta-drab.vercel.app until the steps below are done.
 
 Connecting it takes two people: whoever owns the Vercel project (step 1), then whoever has the Porkbun login (step 2).
