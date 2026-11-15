@@ -32,8 +32,8 @@ export default function AccessibilityPage() {
         <p>Automated checks with axe-core, plus manual testing with VoiceOver and TalkBack.</p>
         <h2>Tell us what isn&apos;t working</h2>
         <p>
-          If anything in SightLine or on this site gets in your way, we want to hear about it. Email{" "}
-          <a href="mailto:hello@sightline.example">hello@sightline.example</a>.
+          If anything in SightLine or on this site gets in your way, we want to hear about it.{" "}
+          <a href="https://github.com/miguelr-dev/sightline/issues">Open an issue on GitHub</a>.
         </p>
       </article>
     </SiteShell>

@@ -21,7 +21,7 @@ export default function TermsPage() {
         <p>We may change or pause the service during early access. We&apos;ll update this page when the terms change.</p>
         <h2>Contact</h2>
         <p>
-          <a href="mailto:hello@sightline.example">hello@sightline.example</a>
+          <a href="https://github.com/miguelr-dev/sightline/issues">Open an issue on GitHub</a>
         </p>
       </article>
     </SiteShell>

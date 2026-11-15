@@ -2,17 +2,9 @@ import Link from "next/link";
 import { PHOTO_CREDITS } from "./content";
 import { LogoMark, SocialIcon } from "./Icons";
 
-const EMAIL = "hello@sightline.example"; // TODO: replace with the team's real address
-
-// Social links are placeholders until the team has accounts.
-const SOCIALS = [
-  { name: "x", label: "X (placeholder link)", href: "#" },
-  { name: "instagram", label: "Instagram (placeholder link)", href: "#" },
-  { name: "tiktok", label: "TikTok (placeholder link)", href: "#" },
-  { name: "linkedin", label: "LinkedIn (placeholder link)", href: "#" },
-  { name: "youtube", label: "YouTube (placeholder link)", href: "#" },
-  { name: "github", label: "GitHub", href: "https://github.com/miguelr-dev/sightline" },
-] as const;
+// The team has no email address or social accounts yet, so contact goes through GitHub.
+const CONTACT = "https://github.com/miguelr-dev/sightline/issues";
+const SOCIALS = [{ name: "github", label: "GitHub", href: "https://github.com/miguelr-dev/sightline" }] as const;
 
 export function SiteFooter() {
   return (
@@ -26,9 +18,6 @@ export function SiteFooter() {
             </Link>
             <p className="muted2" style={{ margin: "16px 0 0", maxWidth: 300 }}>
               Point your camera. Hear the world.
-            </p>
-            <p style={{ margin: "18px 0 0" }}>
-              <a href={`mailto:${EMAIL}`}>{EMAIL}</a>
             </p>
             <div className="socials">
               {SOCIALS.map((s) => (
@@ -51,7 +40,7 @@ export function SiteFooter() {
             <h2 id="f-company">Company</h2>
             <ul>
               <li><Link href="/press">Press kit</Link></li>
-              <li><a href={`mailto:${EMAIL}`}>Contact</a></li>
+              <li><a href={CONTACT}>Contact</a></li>
               <li><a href="https://github.com/miguelr-dev/sightline">Source code</a></li>
             </ul>
           </nav>
