@@ -1,9 +1,9 @@
-import { MODES, type Mode, type RequestMode } from "./modes";
+import { MODES, SPEECH_LANGUAGES, type Mode, type RequestMode } from "./modes";
 
 // Server-only: mode-specific instructions for Claude.
 
 /** Bump when the prompts change, so cached answers from older prompts aren't reused. */
-export const PROMPT_VERSION = "2026-11-14.11";
+export const PROMPT_VERSION = "2026-11-14.14";
 
 const BASE = `You are SightLine, a visual assistant that reads the world out loud, for blind and low-vision people and for travelers who can't read the local language. The user pointed a phone camera at something. They can't see it, so your answer is their only view of it.
 
@@ -22,6 +22,7 @@ Reply with these fields:
   Use "none" and an empty webQuery when no specific named thing is the main subject: ordinary scenes, rooms, people, letters, mail, documents, slides, screens, or text you can't read well enough to name.
   Generic signs are always "none" with an empty webQuery, even in Translate mode: Exit, Caution, No Smoking, restrooms, construction or warning signs, traffic signs and street-name signs. "place" needs a named business or landmark.
 - brand: the product's brand exactly as printed (for example "Red Bull", "Kirkland Signature"), or empty if no brand is clearly printed in the photo. Never guess a brand from colors, shape or a similar product.
+- spokenLanguage: the language the words of spokenText are in, as one of these codes: ${SPEECH_LANGUAGES.join(", ")}. A voice for that language reads spokenText aloud.
 - barcode: the digits printed under a UPC or EAN barcode, digits only (for example "049000028911"), if every digit is clearly legible; otherwise empty. Never guess digits, and never fill in a digit that is cut off, blurred or covered.
 
 Rules:
@@ -64,6 +65,7 @@ ${DOCUMENT_TYPES}
 - Transcription: copy spelling exactly as printed, even if it looks wrong (a misprint such as "Reliver" stays "Reliver"); never correct or modernize words.
 - Never translate: give the text in the language it's printed in, exactly as printed, even if it isn't English. Only Translate mode translates.
 - spokenText: the text itself, word for word, never paraphrased or summarized. In Read mode only, read all of it if it's 35 words or fewer. If it's longer, give its title or what it is in a few words ("Letter from the city water department."), then read its first sentence word for word. Start with the first words of the text itself. Don't say what it's printed on or how it's laid out: no "Slide with three bullets:", "A page that says" or "A screen showing".
+- One language per answer: spokenText is only the printed text, in the language it's printed in, with no framing in another language (no "The sign says", "It reads" or "Letter from…" in English before Spanish text). So for longer text that isn't in English, skip the title and read its first sentences word for word. spokenLanguage is that text's language.
 - sections: the complete text, word for word, keeping line breaks: one "Full text" section, or one section per heading if the document has headings.
 If there is no readable text, say "No readable text" and at most 8 words about what's there. Don't describe the scene.`,
 
@@ -102,9 +104,19 @@ ${DOCUMENT_TYPES}
 ${modes}`;
 }
 
-export function systemPrompt(mode: RequestMode, language: string): string {
-  if (mode === "auto") return `${BASE}\n\n${autoInstructions(language)}`;
-  return `${BASE}\n\n${MODE_INSTRUCTIONS[mode](language)}`;
+// The structured menu field, asked for in Menu and Auto modes when there's no question.
+const MENU_FIELD = `Menu field (this overrides the Menu mode's "sections" rule for restaurant menus):
+- menu: only for a restaurant, cafe or bar menu, when the answer is in Menu mode. Otherwise give an empty name and no sections (products, medicine labels and every other mode).
+  - name: the restaurant or menu name as printed, or empty.
+  - sections: the menu's own headings, in printed order, each with every item under it, top to bottom.
+  - Each item: name as printed; price exactly as printed, with its currency sign if printed ("$12.79", "12", "MP"), or empty; description as printed, shortened only if very long, or empty; tags only for markers actually printed or marked on the menu: "vegetarian" (V or a leaf), "vegan" (VG), "gluten_free" (GF), "spicy" (a chili icon or the word spicy), "contains_nuts" (a nut icon or "contains nuts"). Never guess tags or allergens from a dish's name or ingredients: a dish that is obviously vegetarian (a Margherita pizza, steamed vegetables) gets no tag unless the menu marks it. If the menu prints no dietary markers at all, every tags list is empty.
+- When menu has the dishes, don't repeat them in sections: sections then hold only other notes, such as hours, the dietary key or an allergen notice.
+- spokenText for a menu stays a short overview: the name, how many sections and what they are, and the price range ("Harbor Table lunch menu: three sections, starters, mains and desserts, 6.50 to 24 dollars.").`;
+
+export function systemPrompt(mode: RequestMode, language: string, opts: { menu?: boolean } = {}): string {
+  const menu = opts.menu && (mode === "menu" || mode === "auto") ? `\n\n${MENU_FIELD}` : "";
+  if (mode === "auto") return `${BASE}\n\n${autoInstructions(language)}${menu}`;
+  return `${BASE}\n\n${MODE_INSTRUCTIONS[mode](language)}${menu}`;
 }
 
 export function userPrompt(

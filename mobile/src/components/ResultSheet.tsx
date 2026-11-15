@@ -1,5 +1,5 @@
 import { Image } from "expo-image";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ComponentRef } from "react";
 import { listenAction } from "../logic/webSpeech";
 import { lookupLanguage } from "../logic/lookupRequest";
 import { initialReadAll, reduceReadAll, type ReadAllEvent, type ReadAllState } from "../logic/readAll";
@@ -20,10 +20,12 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { languageCode, MODE_LABELS, type AnalyzeResponse, type LookupSource, type Section } from "../modes";
 import { RATES } from "../settings";
+import { answerLang } from "../logic/speechLang";
 import { colors, MIN_TARGET, radius, type } from "../theme";
 import type { Shot } from "../types";
 import { SectionList } from "./Disclosure";
 import { Magnifier } from "./Magnifier";
+import { MenuView } from "./MenuView";
 import { Segmented } from "./Segmented";
 import { Icon, IconButton, PillButton } from "./ui";
 
@@ -43,13 +45,20 @@ type Props = {
   onStop: () => void;
   onRate: (r: number) => void;
   onAsk: (q: string) => void;
-  onMic: () => void;
+  onMic: (context?: string) => void; // context: a dish the spoken question is about
   onRetry: () => void;
   onLookup: () => void;
 };
 
 function host(url: string) {
   return url.replace(/^https?:\/\/(www\.)?/, "").split("/")[0];
+}
+
+// With a menu, the sections that aren't its dishes (hours, the dietary key); otherwise all of them.
+function notMenu(r: AnalyzeResponse): Section[] {
+  if (!r.menu || r.error) return sectionsOf(r);
+  const dishes = new Set(r.menu.sections.map((m) => m.title));
+  return sectionsOf(r).filter((x) => !dishes.has(x.title));
 }
 
 // Server sections when it sends them; an older server's free-text details as one section.
@@ -62,11 +71,14 @@ function sectionsOf(r: AnalyzeResponse): Section[] {
 export function ResultSheet(p: Props) {
   const insets = useSafeAreaInsets();
   const [question, setQuestion] = useState("");
+  const scroll = useRef<ComponentRef<typeof ScrollView>>(null);
+  const field = useRef<ComponentRef<typeof TextInput>>(null);
+  const menuY = useRef(0);
   const shot = p.shot;
   const r = shot?.result;
   const looking = !!shot && !r;
   const askBusy = !!shot?.followUps.some((f) => !f.answer);
-  const lang = shot?.mode === "translate" ? languageCode(shot.language) : "en-US";
+  const lang = shot ? answerLang(shot.mode, shot.language, r?.spokenLanguage) : "en-US";
 
   // Read all: every section (answer, then web) in order, one owner per section.
   const [magnify, setMagnify] = useState(false);
@@ -97,7 +109,15 @@ export function ResultSheet(p: Props) {
     p.onAsk(q);
   };
 
-  const ratio = shot?.photo ? Math.min(1.6, Math.max(0.8, shot.photo.width / shot.photo.height)) : 0.8;
+  // Ask about one dish: the keyboard opens pre-filled, or the mic records a question about it.
+  const askDish = (name: string, via: "keyboard" | "voice") => {
+    if (via === "voice" && p.canRecord && !p.recording && !askBusy) return p.onMic(`About the ${name}:`);
+    setQuestion(`Is the ${name} `);
+    setTimeout(() => field.current?.focus(), 50);
+  };
+
+  // A menu's photo is a short strip (tap to magnify); the dishes below matter more.
+  const ratio = r?.menu && !r.error ? 2.4 : shot?.photo ? Math.min(1.6, Math.max(0.8, shot.photo.width / shot.photo.height)) : 0.8;
 
   return (
     <Modal
@@ -127,6 +147,7 @@ export function ResultSheet(p: Props) {
         <Magnifier uri={shot?.photo?.uri ?? null} visible={magnify} reduceMotion={p.reduceMotion} onClose={() => setMagnify(false)} />
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <ScrollView
+            ref={scroll}
             contentContainerStyle={[s.content, { paddingBottom: insets.bottom + 32 }]}
             keyboardShouldPersistTaps="handled"
           >
@@ -182,9 +203,16 @@ export function ResultSheet(p: Props) {
                     </Text>
                   </View>
                 ) : (
-                  <Text style={s.lead} selectable>
-                    {r.spokenText}
-                  </Text>
+                  <View style={{ gap: 4 }}>
+                    {r.menu?.name ? (
+                      <Text style={type.largeTitle} accessibilityRole="header">
+                        {r.menu.name}
+                      </Text>
+                    ) : null}
+                    <Text style={s.lead} selectable>
+                      {r.spokenText}
+                    </Text>
+                  </View>
                 )}
                 {r.barcode?.found && !r.error ? (
                   <Text style={type.caption} selectable>
@@ -232,7 +260,20 @@ export function ResultSheet(p: Props) {
                   />
                 </View>
 
+                {r.menu && !r.error ? (
+                  <View onLayout={(e) => (menuY.current = e.nativeEvent.layout.y)}>
+                    <MenuView
+                      key={`m-${shot!.id}`}
+                      menu={r.menu}
+                      idPrefix={`m-${shot!.id}`}
+                      lang={lang}
+                      onScrollTo={(y) => scroll.current?.scrollTo({ y: Math.max(0, menuY.current + y - 8), animated: !p.reduceMotion })}
+                      onAskDish={askDish}
+                    />
+                  </View>
+                ) : null}
                 {(() => {
+                  if (r.menu && !r.error) return null; // the menu has its own section reading
                   const answerSecs = sectionsOf(r);
                   const webSecs = shot!.web.status === "done" ? shot!.web.data.sections ?? [] : [];
                   if (answerSecs.length + webSecs.length < 2) return null;
@@ -258,7 +299,13 @@ export function ResultSheet(p: Props) {
                     />
                   );
                 })()}
-                <SectionList key={`r-${shot!.id}`} idPrefix={`r-${shot!.id}`} lang={lang} sections={sectionsOf(r)} reduceMotion={p.reduceMotion} />
+                <SectionList
+                  key={`r-${shot!.id}`}
+                  idPrefix={`r-${shot!.id}`}
+                  lang={lang}
+                  sections={notMenu(r)}
+                  reduceMotion={p.reduceMotion}
+                />
 
                 {shot!.followUps.map((f) => (
                   <View key={f.id} style={s.section}>
@@ -290,6 +337,7 @@ export function ResultSheet(p: Props) {
                     </Text>
                     <View style={s.askRow}>
                       <TextInput
+                        ref={field}
                         value={question}
                         onChangeText={setQuestion}
                         onSubmitEditing={send}
@@ -313,7 +361,7 @@ export function ResultSheet(p: Props) {
                       <PillButton
                         label={p.recording ? "Stop and ask" : p.transcribing ? "Listening back…" : "Ask by voice"}
                         variant="secondary"
-                        onPress={p.onMic}
+                        onPress={() => p.onMic()}
                         busy={p.transcribing}
                         disabled={askBusy}
                         accessibilityHint={p.recording ? "Stops recording and asks your question" : "Records a spoken question"}

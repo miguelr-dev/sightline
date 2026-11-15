@@ -44,6 +44,17 @@ export const LANGUAGES: Language[] = [
   { name: "Tagalog", code: "fil-PH" },
 ];
 
+/** The primary tag of each language above ("en", "es", … "fil"): what the analyze reply's
+ *  spokenLanguage may be, so the client can pick a matching voice. */
+export const SPEECH_LANGUAGES: string[] = LANGUAGES.map((l) => l.code.split("-")[0]);
+
+/** A valid spokenLanguage ("es-ES" and "ES" become "es"), or undefined. */
+export function spokenLanguageCode(v: unknown): string | undefined {
+  if (typeof v !== "string") return undefined;
+  const tag = v.trim().toLowerCase().split(/[-_]/)[0];
+  return SPEECH_LANGUAGES.includes(tag) ? tag : undefined;
+}
+
 export function findLanguage(name: string | undefined): Language | undefined {
   if (!name) return undefined;
   const n = name.trim().toLowerCase();
@@ -78,6 +89,19 @@ export type Section = {
   provenance?: "label" | "web"; // read from the photo, or found online
 };
 
+/** Dietary markers a menu item can carry, set only when the menu prints or marks them. */
+export const MENU_TAGS = ["vegetarian", "vegan", "gluten_free", "spicy", "contains_nuts"] as const;
+export type MenuTag = (typeof MENU_TAGS)[number];
+export type MenuItem = {
+  name: string;
+  price?: string; // exactly as printed ("$12.79", "12", "MP")
+  priceValue?: number; // parsed from price, for filters; absent for "MP" or no price
+  description?: string;
+  tags?: MenuTag[];
+};
+/** A restaurant menu, structured (Menu mode, or Auto choosing menu, without a question). */
+export type Menu = { name?: string; sections: { title: string; items: MenuItem[] }[] };
+
 /** A turn of the conversation about the current photo or page (the last 6 are sent). */
 export type ConversationTurn = { question: string; answer: string };
 
@@ -94,6 +118,8 @@ export type AnalyzeResponse = {
   utterance?: string; // the request's utterance, echoed back (trimmed, max 300 chars)
   interpreted?: { mode: Mode; question?: string; language?: string }; // what it was taken to mean
   autoLookup?: boolean; // "search for this": run /api/lookup now and speak its summary next
+  spokenLanguage?: string; // primary tag from SPEECH_LANGUAGES ("es"): the language spokenText is in
+  menu?: Menu; // a restaurant menu's dishes by section; `sections` stays as the flat fallback
   brand?: string; // the brand: from a barcode printed in the photo, else as printed; absent if unknown
   barcode?: BarcodeResponse; // a barcode printed in the photo, read and found (its facts are merged)
   error?: boolean;

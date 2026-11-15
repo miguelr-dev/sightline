@@ -2,6 +2,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import {
   ITEM_KINDS,
   MODES,
+  SPEECH_LANGUAGES,
+  spokenLanguageCode,
   type AnalyzeResponse,
   type ItemKind,
   type ConversationTurn,
@@ -32,6 +34,7 @@ import {
 } from "@/lib/claude";
 import { lookupPhotoBarcode, productIdentity, type BarcodeResult } from "@/lib/barcode";
 import { GENERIC_WORDS } from "@/lib/hat";
+import { cleanMenu, MENU_SCHEMA, menuToSections } from "@/lib/menu";
 
 // Server-only: read a photo with Claude, with the Neon analysis cache and scan history.
 // Used by /api/analyze and by the hat camera's /api/device/frame.
@@ -45,8 +48,9 @@ const OUTPUT_SCHEMA = {
     webQuery: { type: "string" },
     brand: { type: "string" }, // as printed, or empty
     barcode: { type: "string" }, // digits printed under a UPC/EAN barcode, or empty
+    spokenLanguage: { type: "string", enum: SPEECH_LANGUAGES }, // the language of spokenText
   },
-  required: ["spokenText", "sections", "itemKind", "webQuery", "brand", "barcode"],
+  required: ["spokenText", "sections", "itemKind", "webQuery", "brand", "barcode", "spokenLanguage"],
   additionalProperties: false,
 } as const;
 
@@ -56,6 +60,15 @@ const AUTO_SCHEMA = {
   properties: { chosenMode: { type: "string", enum: [...MODES] }, ...OUTPUT_SCHEMA.properties },
   required: ["chosenMode", ...OUTPUT_SCHEMA.required],
 } as const;
+
+// Menu and Auto without a question: the model also returns the structured menu (lib/menu.ts).
+const withMenu = <T extends { properties: object; required: readonly string[] }>(schema: T) => ({
+  ...schema,
+  properties: { ...schema.properties, menu: MENU_SCHEMA },
+  required: [...schema.required, "menu"],
+});
+const MENU_OUTPUT_SCHEMA = withMenu(OUTPUT_SCHEMA);
+const MENU_AUTO_SCHEMA = withMenu(AUTO_SCHEMA);
 
 // Search angle words, dropped when turning a web query into a short history title.
 const ANGLE_WORDS =
@@ -168,6 +181,8 @@ type Parsed = {
   itemKind?: unknown;
   brand?: unknown;
   barcode?: unknown;
+  spokenLanguage?: unknown;
+  menu?: unknown;
 };
 
 function fail(spokenText: string, status: number): AnalyzeResult {
@@ -198,12 +213,69 @@ export function cleanConversation(v: unknown): ConversationTurn[] {
 
 /** Sections about what isn't there ("Not visible", "Missing information") say nothing useful. */
 const EMPTY_SECTION = /not visible|missing|unknown|not shown/i;
+// A clause that only says something isn't in the photo: "Not visible on this label", "cut off".
+const NOT_THERE =
+  /\b(?:not|isn't|aren't|is not|are not|can't be|cannot be)\s+(?:clearly\s+|fully\s+)?(?:visible|shown|readable|legible|in view|in (?:the|this) (?:photo|frame|image|picture))\b|\bcut off\b|\bunreadable\b|\billegible\b|\bout of (?:the )?frame\b|^on (?:the|another|the other) (?:back|side)\b/i;
+// A retake tip that goes with such a note: "turn the can to read them".
+const RETAKE_TIP = /^(?:turn|rotate|move|hold|tilt|flip|try|check)\b/i;
+// Sections worth a one-line pointer when they had to be dropped.
+const IMPORTANT = /ingredients?|nutrition|allergens?|warnings?|directions|expir|best by|use by|dosage/gi;
 
-/** Label-read sections are tagged as coming from the photo; "nothing here" sections are dropped. */
-function fromLabel(sections: { title: string; body: string }[]): Section[] {
-  return sections
-    .filter((s) => !EMPTY_SECTION.test(s.title))
-    .map((s) => ({ ...s, provenance: "label" as const }));
+/** The body without its "isn't visible" clauses and their retake tips. A clause with a number in
+ *  it ("10 calories, other values not visible") is real content and stays. */
+function withoutNotes(body: string): string {
+  return body
+    .split("\n")
+    .map((line) => {
+      const pieces = line.split(/(?<=[.;!?])\s+/).filter(Boolean);
+      const note = (p: string) => NOT_THERE.test(p) && !/\d/.test(p);
+      if (!pieces.some(note)) return line;
+      return pieces
+        .filter((p) => !note(p) && !RETAKE_TIP.test(p))
+        .join(" ")
+        .replace(/[;,:]\s*$/, ".");
+    })
+    .filter((line) => line.trim())
+    .join("\n")
+    .trim();
+}
+
+/**
+ * Label-read sections, tagged as coming from the photo. "Nothing here" sections are dropped,
+ * whether the title says it ("Not visible") or only the body does ("Ingredients and nutrition:
+ * Not visible on this label…"). `missing` lists the dropped titles, for foldMissing. Read and
+ * Translate sections are verbatim text and only lose a not-visible title.
+ */
+export function labelSections(
+  raw: { title: string; body: string }[],
+  mode: Mode,
+): { sections: Section[]; missing: string[] } {
+  const verbatim = mode === "read" || mode === "translate";
+  const missing: string[] = [];
+  const sections: Section[] = [];
+  for (const s of raw) {
+    if (EMPTY_SECTION.test(s.title)) continue;
+    const body = verbatim ? s.body : withoutNotes(s.body);
+    if (!body) {
+      missing.push(s.title);
+      continue;
+    }
+    sections.push({ ...s, body, provenance: "label" });
+  }
+  return { sections, missing };
+}
+
+/** One short line in the first section for important dropped sections ("Ingredients and
+ *  nutrition: not in this photo; try another side."), unless another section covers them. */
+export function foldMissing(sections: Section[], missing: string[]): Section[] {
+  if (!sections.length) return sections;
+  const have = sections.map((s) => s.title).join(" ").toLowerCase();
+  const titles = missing.filter((t) =>
+    (t.match(IMPORTANT) ?? []).some((w) => !have.includes(w.toLowerCase().replace(/s$/, ""))),
+  );
+  if (!titles.length) return sections;
+  const line = `${titles.join(", ")}: not in this photo; try another side.`;
+  return [{ ...sections[0], body: `${sections[0].body}\n${line}` }, ...sections.slice(1)];
 }
 
 const MAX_SPOKEN_WORDS = 25;
@@ -377,10 +449,12 @@ export async function analyzePhoto(input: AnalyzeInput): Promise<AnalyzeResult> 
       ? (await getCachedAnalysis(keyFor(undefined, undefined)))?.page?.text
       : undefined;
 
+    // A whole menu, dish by dish, only for a fresh photo: follow-ups answer from the photo.
+    const wantsMenu = !followUp && (mode === "menu" || mode === "auto");
     const parsed = await askJson<Parsed>(client, {
       model,
-      maxTokens: 3000, // a full page of text fits; spoken answers stay short
-      system: systemPrompt(mode, targetLanguage),
+      maxTokens: wantsMenu ? 8000 : 3000, // a full page of text fits; spoken answers stay short
+      system: systemPrompt(mode, targetLanguage, { menu: wantsMenu }),
       content: [
         image,
         {
@@ -392,7 +466,14 @@ export async function analyzePhoto(input: AnalyzeInput): Promise<AnalyzeResult> 
           }),
         },
       ],
-      schema: mode === "auto" ? AUTO_SCHEMA : OUTPUT_SCHEMA,
+      schema:
+        mode === "auto"
+          ? wantsMenu
+            ? MENU_AUTO_SCHEMA
+            : AUTO_SCHEMA
+          : wantsMenu
+            ? MENU_OUTPUT_SCHEMA
+            : OUTPUT_SCHEMA,
     });
 
     if (!parsed) {
@@ -403,7 +484,6 @@ export async function analyzePhoto(input: AnalyzeInput): Promise<AnalyzeResult> 
       typeof parsed.spokenText === "string" && parsed.spokenText.trim()
         ? parsed.spokenText.trim()
         : "I couldn't make out anything in that photo. Please try again.";
-    let sections = fromLabel(cleanSections(parsed.sections));
     let itemKind: ItemKind = ITEM_KINDS.includes(parsed.itemKind as ItemKind)
       ? (parsed.itemKind as ItemKind)
       : "none";
@@ -421,6 +501,10 @@ export async function analyzePhoto(input: AnalyzeInput): Promise<AnalyzeResult> 
         : MODES.includes(parsed.chosenMode as Mode)
           ? (parsed.chosenMode as Mode)
           : "describe";
+    const label = labelSections(cleanSections(parsed.sections), chosen);
+    // A restaurant menu: the dishes come structured; their flat copy leads the sections.
+    const menu = wantsMenu && chosen === "menu" ? cleanMenu(parsed.menu) : undefined;
+    let sections = menu ? [...menuToSections(menu), ...label.sections] : label.sections;
 
     // Barcode digits printed in the photo (not in Translate, not for questions): the product's
     // exact identity and facts from the barcode lookup, if it answers within 2.5 s.
@@ -437,6 +521,8 @@ export async function analyzePhoto(input: AnalyzeInput): Promise<AnalyzeResult> 
       }
     }
 
+    sections = foldMissing(sections, label.missing);
+
     return finish(
       {
         spokenText: spoken,
@@ -445,7 +531,11 @@ export async function analyzePhoto(input: AnalyzeInput): Promise<AnalyzeResult> 
         webQuery,
         itemKind,
         mode: chosen,
+        ...(spokenLanguageCode(parsed.spokenLanguage)
+          ? { spokenLanguage: spokenLanguageCode(parsed.spokenLanguage) }
+          : {}),
         ...(brand ? { brand } : {}),
+        ...(menu ? { menu } : {}),
         ...(found
           ? {
               barcode: {

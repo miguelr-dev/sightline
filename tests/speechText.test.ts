@@ -60,6 +60,16 @@ describe("speakableUnits: spell out units for the voice only", () => {
     expect(speakable("Protein 1g", "en-US")).toBe("Protein one gram");
   });
 
+  it.each([
+    ["Desserts, 6.50 to 24 dollars.", "Desserts, six dollars and fifty cents to twenty-four dollars."],
+    ["$6.50 to $24", "six dollars and fifty cents to twenty-four dollars"],
+    ["7 to 24 dollars", "seven to twenty-four dollars"],
+    ["7 to 24.50 dollars", "seven dollars to twenty-four dollars and fifty cents"],
+    ["6.50-24 dollars", "six dollars and fifty cents to twenty-four dollars"],
+  ])("price range %s → %s", (input, expected) => {
+    expect(speakable(input, "en-US")).toBe(expected);
+  });
+
   it("only rewrites English, so other languages keep their own unit reading", () => {
     expect(speakableUnits("Azúcar 27 g", "es-ES")).toBe("Azúcar 27 g");
   });

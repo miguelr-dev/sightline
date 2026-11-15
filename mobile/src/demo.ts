@@ -4,7 +4,7 @@ import type { AnalyzeResponse, AskAnswer, LookupResponse, Mode, Scan, Voice } fr
 import type { Shot } from "./types";
 
 // Web-only fixture for design screenshots (npx expo export --platform web, then open
-// index.html?shot=home|result|web|settings|translate). Text is from real server responses for
+// index.html?shot=home|result|web|settings|translate|menu). Text is from real server responses for
 // public/demo/menu.jpg, reshaped into the new short-answer + sections contract. Returns null on
 // iOS, so none of this runs in the app.
 
@@ -24,6 +24,45 @@ const RESULT: AnalyzeResponse = {
       body: "HARBOR TABLE\nLunch Menu, 11am to 3pm\n\nSTARTERS\nTomato Basil Soup (V), $7.50\nCrispy Calamari, $12.00\nCaesar Salad, $10.00\n\nMAINS\nGrilled Salmon, lemon butter, $24.00\nMushroom Risotto (V, GF), $18.00\nFish Tacos (spicy), $16.50\nClassic Cheeseburger, $15.00\n\nDESSERTS\nChocolate Lava Cake, $9.00\nLemon Sorbet (VG, GF), $6.50\n\nV vegetarian, VG vegan, GF gluten free. Ask about allergens.",
     },
   ],
+  webQuery: "Harbor Table restaurant menu hours reviews allergens",
+  itemKind: "restaurant",
+};
+
+// The structured menu (MenuView), from a live /api/analyze answer for public/demo/menu.jpg.
+const MENU_RESULT: AnalyzeResponse = {
+  spokenText: "Harbor Table lunch menu, 11am to 3pm: three sections, starters, mains and desserts, 6.50 to 24 dollars. Fish Tacos are spicy.",
+  details: "",
+  spokenLanguage: "en",
+  menu: {
+    name: "Harbor Table",
+    sections: [
+      {
+        title: "Starters",
+        items: [
+          { name: "Tomato Basil Soup", price: "$7.50", priceValue: 7.5, tags: ["vegetarian"] },
+          { name: "Crispy Calamari", price: "$12.00", priceValue: 12 },
+          { name: "Caesar Salad", price: "$10.00", priceValue: 10 },
+        ],
+      },
+      {
+        title: "Mains",
+        items: [
+          { name: "Grilled Salmon", price: "$24.00", priceValue: 24, description: "Lemon butter" },
+          { name: "Mushroom Risotto", price: "$18.00", priceValue: 18, tags: ["vegetarian", "gluten_free"] },
+          { name: "Fish Tacos", price: "$16.50", priceValue: 16.5, tags: ["spicy"] },
+          { name: "Classic Cheeseburger", price: "$15.00", priceValue: 15 },
+        ],
+      },
+      {
+        title: "Desserts",
+        items: [
+          { name: "Chocolate Lava Cake", price: "$9.00", priceValue: 9 },
+          { name: "Lemon Sorbet", price: "$6.50", priceValue: 6.5, tags: ["vegan", "gluten_free"] },
+        ],
+      },
+    ],
+  },
+  sections: [{ title: "Dietary key", body: "V vegetarian, VG vegan, GF gluten free. Ask about allergens." }],
   webQuery: "Harbor Table restaurant menu hours reviews allergens",
   itemKind: "restaurant",
 };
@@ -114,9 +153,9 @@ export function demoState(): Demo | null {
     label: "Barcode",
   };
   return {
-    shot: q === "barcode-result" ? barcodeShot : shot,
+    shot: q === "barcode-result" ? barcodeShot : q === "menu" ? { ...shot, id: 9, result: MENU_RESULT, web: { status: "idle" } } : shot,
     sheet:
-      q === "result" || q === "web" || q === "barcode-result"
+      q === "result" || q === "web" || q === "barcode-result" || q === "menu"
         ? "result"
         : q === "settings"
           ? "settings"

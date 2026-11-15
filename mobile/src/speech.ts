@@ -4,6 +4,7 @@ import { File, Paths } from "expo-file-system";
 import { speakClip } from "./api";
 import { ClipCache } from "./logic/clipCache";
 import { speakable } from "./logic/speechText";
+import { chunk } from "./logic/chunk";
 
 // Speech output. ElevenLabs voices through /api/speak, played with expo-audio, one sentence-sized
 // chunk at a time with the next chunk fetched while the current one plays. Falls back to the
@@ -13,32 +14,6 @@ const FIRST_CHUNK = 140; // a short first clip comes back from the server sooner
 const CHUNK = 300;
 const CACHE_LIMIT = 40;
 const COOLDOWN_MS = 30_000;
-
-function chunk(text: string, max: number, firstMax = max): string[] {
-  const sentences = text.replace(/\s+/g, " ").match(/[^.!?。！？]+[.!?。！？]*\s*/g) ?? [text];
-  const out: string[] = [];
-  let cur = "";
-  for (const s of sentences) {
-    const limit = out.length ? max : firstMax;
-    if ((cur + s).length > limit && cur) {
-      out.push(cur.trim());
-      cur = "";
-    }
-    if (s.length > max) {
-      for (const w of s.split(/\s+/)) {
-        if ((cur + " " + w).length > max && cur) {
-          out.push(cur.trim());
-          cur = "";
-        }
-        cur += (cur ? " " : "") + w;
-      }
-    } else {
-      cur += s;
-    }
-  }
-  if (cur.trim()) out.push(cur.trim());
-  return out.length ? out : [text];
-}
 
 // kind: "speech" goes through ElevenLabs (or the device voice); "device" always uses the iPhone
 // voice (hints); "preview" plays a voice sample. Everything goes through one queue, so nothing
@@ -73,6 +48,12 @@ class SpeechEngine {
   natural = true; // user setting
   voiceId = ""; // "" = the server's default voice
   serverHasVoice: boolean | null = null; // from /api/features; null = unknown, try it
+  offline = false; // the server can't be reached: use the device voice at once, no 9 s wait
+
+  /** A request just timed out or got no answer: skip the server voice for a while. */
+  serverTrouble() {
+    this.cooldownUntil = Date.now() + COOLDOWN_MS;
+  }
 
   async init() {
     // Clips from earlier sessions are never reused: clear them out.
@@ -180,7 +161,7 @@ class SpeechEngine {
   }
 
   private useNatural() {
-    return this.natural && this.serverHasVoice !== false && Date.now() > this.cooldownUntil;
+    return this.natural && !this.offline && this.serverHasVoice !== false && Date.now() > this.cooldownUntil;
   }
 
   private async drain() {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ComponentRef } from "react";
 import {
   ActivityIndicator,
   Modal,
@@ -65,6 +65,7 @@ export function SettingsSheet({
   voices,
   speaking,
   historyOn,
+  focusServer = false,
   onClearHistory,
   hatStatus,
   onConnectHat,
@@ -82,6 +83,7 @@ export function SettingsSheet({
   voices: Voice[] | null;
   speaking: boolean;
   historyOn: boolean;
+  focusServer?: boolean; // opened from "Can't reach the server": scroll to Server (the last group)
   onClearHistory: () => void;
   hatStatus: HatStatus | null; // null = not connected
   onConnectHat: (deviceId: string, pairCode: string) => void;
@@ -102,6 +104,12 @@ export function SettingsSheet({
     setHatCode(settings.hatPairCode);
   }, [settings.hatDeviceId, settings.hatPairCode, visible]);
   const hatOn = hatStatus !== null;
+  const scroll = useRef<ComponentRef<typeof ScrollView>>(null);
+  useEffect(() => {
+    if (!visible || !focusServer) return;
+    const t = setTimeout(() => scroll.current?.scrollToEnd({ animated: !reduceMotion }), 350); // after the sheet slides in
+    return () => clearTimeout(t);
+  }, [visible, focusServer, reduceMotion]);
   useEffect(() => setUrl(settings.apiUrl), [settings.apiUrl, visible]);
 
   const commitUrl = () => {
@@ -113,7 +121,7 @@ export function SettingsSheet({
     <Modal visible={visible} presentationStyle="pageSheet" animationType={reduceMotion ? "none" : "slide"} onRequestClose={onClose}>
       <View style={s.root}>
         <SheetHeader title="Settings" onClose={onClose} />
-        <ScrollView contentContainerStyle={[s.content, { paddingBottom: insets.bottom + 32 }]} keyboardShouldPersistTaps="handled">
+        <ScrollView ref={scroll} contentContainerStyle={[s.content, { paddingBottom: insets.bottom + 32 }]} keyboardShouldPersistTaps="handled">
           <Text style={type.largeTitle} accessibilityRole="header">
             Settings
           </Text>

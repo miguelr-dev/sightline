@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialBook, parseBookPage, reduceBook, type BookPage, type BookState } from "./book";
+import { bookQuestion, initialBook, parseBookPage, reduceBook, type BookPage, type BookState } from "./book";
 import { trimConversation, conversationFrom } from "./conversation";
 import { provenanceLabel } from "./provenance";
 
@@ -162,5 +162,25 @@ describe("parseBookPage", () => {
   it("returns null without a page or signature", () => {
     expect(parseBookPage(undefined)).toBeNull();
     expect(parseBookPage({ text: "x" })).toBeNull();
+  });
+});
+
+// D8: "Ask about this page" asks in book mode (the server then uses the page's exact text) and
+// sends the earlier questions about the page, so "she" and "that" in a second question resolve.
+describe("bookQuestion", () => {
+  it("sends book:true, Read mode and the question", () => {
+    expect(bookQuestion("IMG", "Where was the key hidden?", [])).toEqual({
+      image: "IMG",
+      mode: "read",
+      book: true,
+      question: "Where was the key hidden?",
+    });
+  });
+
+  it("sends the earlier turns about this page, the last 6 at most", () => {
+    const turns = Array.from({ length: 8 }, (_, i) => ({ question: `q${i}`, answer: `a${i}` }));
+    const req = bookQuestion("IMG", "Why did she hide it there?", turns);
+    expect(req.book).toBe(true);
+    expect(req.conversation).toEqual(turns.slice(-6));
   });
 });

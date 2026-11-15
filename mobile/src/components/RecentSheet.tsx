@@ -17,6 +17,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MODE_LABELS, type AskAnswer, type Mode, type Scan } from "../modes";
+import { HISTORY_UNAVAILABLE, recentView } from "../logic/recent";
 import { colors, MIN_TARGET, radius, type } from "../theme";
 import { SectionList } from "./Disclosure";
 import { Icon, IconButton } from "./ui";
@@ -218,9 +219,14 @@ export function RecentSheet({
               ) : null}
             </View>
           ) : null}
-          {loading && !scans ? (
+          {recentView(scans, loading) === "loading" ? (
             <View style={s.empty} accessible accessibilityLabel="Loading recent scans">
               <ActivityIndicator color={colors.label} />
+            </View>
+          ) : recentView(scans, loading) === "unavailable" ? (
+            <View style={s.empty} accessible accessibilityLiveRegion="polite">
+              <Text style={type.headline}>{HISTORY_UNAVAILABLE}</Text>
+              <Text style={[type.subhead, { textAlign: "center" }]}>Your scans are safe. Try again in a minute.</Text>
             </View>
           ) : !scans?.length ? (
             <View style={s.empty}>

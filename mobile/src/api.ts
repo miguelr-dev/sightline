@@ -6,6 +6,9 @@ import { parseBarcode, parseHistoryScan, parseLookup } from "./logic/parse";
 import { withTimeout } from "./logic/timeout";
 import type { StripMode } from "./logic/modeStrip";
 import { parseBookPage } from "./logic/book";
+import { failureMessage, PROBE_TIMEOUT_MS, REQUEST_TIMEOUTS } from "./logic/reachability";
+import { speechLanguageTag } from "./logic/speechLang";
+import { parseMenu } from "./logic/menu";
 
 // Every call goes to the SightLine Next.js server. No API keys live in the app.
 
@@ -32,6 +35,15 @@ function baseHeaders(): Record<string, string> {
 const NO_SERVER =
   "I can't reach the SightLine server. Check the server address in Settings, then try again.";
 
+// Told when a request times out or gets no answer at all, so the app re-checks the server now.
+let unreachableListener: (() => void) | null = null;
+export function onUnreachable(fn: (() => void) | null) {
+  unreachableListener = fn;
+}
+function noteFailure(status: number) {
+  if (baseUrl && (status === -1 || status === 0)) unreachableListener?.();
+}
+
 type Result<T> = { ok: boolean; status: number; data: T | null };
 
 async function postJson<T>(path: string, body: unknown, timeoutMs: number): Promise<Result<T>> {
@@ -53,16 +65,19 @@ async function postJson<T>(path: string, body: unknown, timeoutMs: number): Prom
     }
     return { ok: res.ok, status: res.status, data };
   } catch {
-    return { ok: false, status: controller.signal.aborted ? -1 : 0, data: null };
+    const status = controller.signal.aborted ? -1 : 0;
+    noteFailure(status);
+    return { ok: false, status, data: null };
   } finally {
     clearTimeout(timer);
   }
 }
 
-export async function getFeatures(): Promise<{ reachable: boolean; features: Features }> {
+/** Reachability probe and feature list (GET /api/features, 3 s). */
+export async function getFeatures(timeoutMs = PROBE_TIMEOUT_MS): Promise<{ reachable: boolean; features: Features }> {
   if (!baseUrl) return { reachable: false, features: UNKNOWN_FEATURES };
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 6000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(`${baseUrl}/api/features`, { headers: baseHeaders(), signal: controller.signal });
     if (!res.ok) return { reachable: true, features: UNKNOWN_FEATURES }; // older server without the route
@@ -96,7 +111,7 @@ export async function analyze(req: {
   conversation?: { question: string; answer: string }[]; // earlier turns about this result (max 6)
   book?: boolean; // book mode: the reply carries `page`
 }): Promise<AnalyzeResponse> {
-  const r = await postJson<AnalyzeResponse>("/api/analyze", req, 55_000);
+  const r = await postJson<AnalyzeResponse>("/api/analyze", req, REQUEST_TIMEOUTS.analyze);
   if (r.data && typeof r.data.spokenText === "string") {
     const data = {
       ...r.data,
@@ -110,13 +125,13 @@ export async function analyze(req: {
       page: parseBookPage((r.data as { page?: unknown }).page) ?? undefined,
       brand: typeof r.data.brand === "string" && r.data.brand.trim() ? r.data.brand.trim() : undefined,
       barcode: ((b) => (b?.found ? b : undefined))(parseBarcode(r.data.barcode)),
+      spokenLanguage: speechLanguageTag(r.data.spokenLanguage) ? r.data.spokenLanguage : undefined,
+      menu: parseMenu(r.data.menu),
     };
     return r.ok ? { ...data, httpStatus: r.status } : { ...data, error: true, httpStatus: r.status };
   }
-  if (r.status === -1) {
-    return { spokenText: "That took too long, so I stopped. Please try again.", details: "", error: true };
-  }
-  return { spokenText: NO_SERVER, details: "", error: true };
+  // Timed out or no answer: say so at once, never silence.
+  return { spokenText: failureMessage(r.status) ?? NO_SERVER, details: "", error: true, httpStatus: r.status };
 }
 
 // Resolves null when the route is missing (404) or lookup isn't configured, so the card hides.
@@ -128,7 +143,7 @@ export async function lookup(req: {
   language?: string; // Translate mode: write the summary in this language
   context: { mode: Mode; spokenText: string; details: string };
 }): Promise<LookupResponse | null> {
-  const r = await postJson<LookupResponse>("/api/lookup", req, 25_000);
+  const r = await postJson<LookupResponse>("/api/lookup", req, REQUEST_TIMEOUTS.lookup);
   if (r.status === 404 || r.status === 405) return null;
   if (r.data && typeof r.data.spokenText === "string") {
     const sources = Array.isArray(r.data.sources)
@@ -146,8 +161,7 @@ export async function lookup(req: {
     };
   }
   return {
-    spokenText:
-      r.status === -1 ? "The web lookup took too long, so I stopped it." : "I couldn't reach the web just now.",
+    spokenText: failureMessage(r.status) ?? "I couldn't reach the web just now.",
     details: "",
     query: req.query,
     sources: [],
@@ -221,7 +235,7 @@ export async function frameCheck(req: {
   lastKey?: string; // the card's current item, so the server keeps the same key for it
   lastLabel?: string;
 }): Promise<{ status: number; data: FrameCheck | null }> {
-  const r = await postJson<FrameCheck>("/api/frame-check", req, 6000);
+  const r = await postJson<FrameCheck>("/api/frame-check", req, REQUEST_TIMEOUTS.frameCheck);
   if (!r.ok || !r.data || typeof r.data.ready !== "boolean") return { status: r.status, data: null };
   return {
     status: r.status,
@@ -447,18 +461,23 @@ export async function unpairHat(hardwareId: string, pairCode: string): Promise<v
   await postJson("/api/device/unpair", { device: hardwareId, pair: pairCode }, 5000).catch(() => undefined);
 }
 
-// Product by barcode. null = route missing or the request failed (the card isn't shown).
-export async function lookupBarcode(code: string, language?: string): Promise<BarcodeResult | null> {
+// Product by barcode. null = route missing or the server couldn't answer (the card isn't shown);
+// "unreachable" = timed out or no answer, so the app can say so.
+export async function lookupBarcode(code: string, language?: string): Promise<BarcodeResult | null | "unreachable"> {
   if (!baseUrl) return null;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12_000);
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUTS.barcode);
+  let answered = false;
   try {
     const q = `code=${encodeURIComponent(code)}${language ? `&language=${encodeURIComponent(language)}` : ""}`;
     const res = await fetch(`${baseUrl}/api/barcode?${q}`, { headers: baseHeaders(), signal: controller.signal });
+    answered = true;
     if (!res.ok) return null;
     return parseBarcode(await res.json(), code) ?? null;
   } catch {
-    return null;
+    if (answered && !controller.signal.aborted) return null; // a bad body, not a dead server
+    noteFailure(controller.signal.aborted ? -1 : 0);
+    return "unreachable";
   } finally {
     clearTimeout(timer);
   }

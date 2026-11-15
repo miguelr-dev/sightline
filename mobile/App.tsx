@@ -27,6 +27,7 @@ import {
   parseDeviceAnswer,
   sendHatCommand,
   lookupBarcode,
+  onUnreachable,
   unpairHat,
   setBaseUrl,
   setDeviceId,
@@ -66,7 +67,10 @@ import { Brackets } from "./src/components/Brackets";
 import { lookupLanguage } from "./src/logic/lookupRequest";
 import { conversationFrom, trimConversation, type Turn } from "./src/logic/conversation";
 import { activeChip, pinchZoom, zoomForFactor, ZOOM_CHIPS } from "./src/logic/zoom";
-import { initialBook, reduceBook, sentenceOwner, type BookEvent, type BookPage, type BookState } from "./src/logic/book";
+import { bookQuestion, initialBook, reduceBook, sentenceOwner, type BookEvent, type BookPage, type BookState } from "./src/logic/book";
+import { initialReach, liveFeaturesPaused, reduceReach, UNREACHABLE, type ReachEvent } from "./src/logic/reachability";
+import { answerLang } from "./src/logic/speechLang";
+import { HISTORY_UNAVAILABLE } from "./src/logic/recent";
 import { BookView } from "./src/components/BookView";
 import { useTurnDetector } from "./src/useTurnDetector";
 import { analyzeModeFor, autoRetry, barcodeAction, concreteMode, detectAllowedIn, frameCheckMode, headerLabel, STRIP_LABELS, STRIP_MODES, type StripMode } from "./src/logic/modeStrip";
@@ -163,6 +167,7 @@ function Main() {
   const [askAvailable, setAskAvailable] = useState(true); // false after /api/ask 404s
   const askId = useRef(0);
   const voiceTarget = useRef<"photo" | "history" | "main" | "hat" | "book">("photo");
+  const micContext = useRef(""); // "About the Grilled Chicken Plate:" for a question asked from a menu row
   const [cmd, setCmd] = useState<CommandState>(initialCommandState);
   const cmdRef = useRef<CommandState>(initialCommandState);
   const cmdLocalId = useRef(0);
@@ -172,6 +177,7 @@ function Main() {
   const [book, setBookState] = useState<BookState>(demo?.book ?? initialBook);
   const bookRef = useRef<BookState>(book);
   const bookPhotos = useRef<string[]>([]); // base64 of each page, for "Ask about this page"
+  const bookTurns = useRef<{ page: number; turns: Turn[] }>({ page: -1, turns: [] }); // questions about the current page
   const bookActive = book.status !== "idle";
   const [speakingOwner, setSpeakingOwner] = useState<string | null>(null);
   const [speaking, setSpeaking] = useState(false);
@@ -249,12 +255,18 @@ function Main() {
   }, [settings]);
 
   const apiUrl = effectiveApiUrl(settings);
+  const reach = useRef(initialReach);
+  const [focusServer, setFocusServer] = useState(false); // Settings opened from the banner
+  useEffect(() => {
+    if (sheet !== "settings") setFocusServer(false);
+  }, [sheet]);
   const checkConnection = useCallback(async () => {
     setBaseUrl(effectiveApiUrl(live.current.settings));
     setConnection((c) => ({ ...c, state: "checking" }));
     setDeviceId(live.current.settings.deviceId);
     const [{ reachable, features }, list] = await Promise.all([getFeatures(), getVoices()]);
     speech.serverHasVoice = features.elevenlabs;
+    reach.current = { state: reachable ? "ok" : "down", probing: false, lastProbeAt: Date.now() };
     setConnection({ state: reachable ? "ok" : "down", features });
     if (demo) return;
     setVoices(list);
@@ -269,6 +281,40 @@ function Main() {
     setBaseUrl(apiUrl);
     void checkConnection();
   }, [apiUrl, checkConnection]);
+
+  // ---- reachability ----------------------------------------------------------------------------
+  // Re-checked on foreground, about every 20 s while the camera is up, and right after a request
+  // times out or gets no answer (logic/reachability.ts). While it's down the banner shows, Detect
+  // and barcode lookups pause, and speech uses the device voice at once.
+  const dispatchReach = useCallback(
+    (e: ReachEvent) => {
+      if (demo) return;
+      const r = reduceReach(reach.current, e);
+      reach.current = r.state;
+      if (r.state.state !== "checking") {
+        setConnection((c) => (c.state === r.state.state || c.state === "checking" ? c : { ...c, state: r.state.state }));
+      }
+      for (const fx of r.effects) {
+        if (fx.type === "refresh") void checkConnection();
+        else
+          void getFeatures().then(({ reachable, features }) => {
+            if (reachable) setConnection((c) => ({ ...c, features }));
+            dispatchReach({ type: "checked", reachable, at: Date.now() });
+          });
+      }
+    },
+    [checkConnection],
+  );
+  useEffect(() => {
+    onUnreachable(() => {
+      speech.serverTrouble(); // don't wait 9 s on the server voice for the error message
+      dispatchReach({ type: "requestFailed", at: Date.now() });
+    });
+    return () => onUnreachable(null);
+  }, [dispatchReach]);
+  useEffect(() => {
+    speech.offline = connection.state === "down";
+  }, [connection.state]);
 
   const update = (patch: Partial<Settings>) => setSettings((s) => ({ ...s, ...patch }));
   const patchShot = (id: number, fn: (s: Shot) => Shot) =>
@@ -300,13 +346,14 @@ function Main() {
   useEffect(() => {
     const sub = AppState.addEventListener("change", (st) => {
       setAppActive(st === "active");
+      if (st === "active") dispatchReach({ type: "foreground", at: Date.now() }); // the network may have changed
       if (st !== "active") {
         silence();
         setZoom(0); // back to 1× when the app is backgrounded
       }
     });
     return () => sub.remove();
-  }, [silence]);
+  }, [silence, dispatchReach]);
 
   // ---- speaking and announcing ---------------------------------------------------------------
   // With Auto-speak on, the app's own voice reads results, so VoiceOver isn't also told (it would
@@ -321,7 +368,7 @@ function Main() {
     [],
   );
 
-  const speakLang = (s: Shot) => (s.mode === "translate" ? languageCode(s.language) : "en-US");
+  const speakLang = (s: Shot, r: AnalyzeResponse | undefined = s.result) => answerLang(s.mode, s.language, r?.spokenLanguage);
 
   // ---- web lookup -------------------------------------------------------------------------------
   const runLookup = useCallback(
@@ -474,7 +521,8 @@ function Main() {
     sheet === "none" &&
     !busy &&
     !speaking &&
-    !recording;
+    !recording &&
+    !liveFeaturesPaused(connection.state);
 
   const auto = useAutoCapture({
     enabled: autoEnabled,
@@ -564,7 +612,13 @@ function Main() {
   // On-device scanning in every mode but Translate. A code seen twice within 500 ms is looked up
   // and offered as a card; nothing is spoken until the user taps it. Logic: logic/barcode.ts.
   const barcodeOn =
-    !hat && !demo && !bookActive && connection.features.barcode === true && barcodeAction(settings.mode) !== "off" && sheet === "none";
+    !hat &&
+    !demo &&
+    !bookActive &&
+    connection.features.barcode === true &&
+    !liveFeaturesPaused(connection.state) &&
+    barcodeAction(settings.mode) !== "off" &&
+    sheet === "none";
   const barcodeState = useRef(initialBarcodeState);
   const [barcodeCard, setBarcodeCardState] = useState<BarcodeResult | null>(demo?.barcode ?? null);
   const barcodeCardRef = useRef<BarcodeResult | null>(barcodeCard);
@@ -586,6 +640,12 @@ function Main() {
   async function confirmBarcode(code: string) {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     const res = await lookupBarcode(code);
+    if (res === "unreachable") {
+      // Never silent: BARCODE mode (the user asked for it) speaks it; otherwise it's shown.
+      if (barcodeAction(live.current.settings.mode) === "openAndSpeak") say(UNREACHABLE);
+      else if (sheetRef.current === "none") setHint(UNREACHABLE);
+      return;
+    }
     if (!res || barcodeState.current.confirmed !== code) return; // failed, or it left the frame
     setBarcodeCard(res);
     // BARCODE mode: the user chose it, so open and speak right away (like book mode).
@@ -847,6 +907,11 @@ function Main() {
   // The preview stops while a sheet is open; give exposure time to settle after it restarts.
   const cameraLive = sheet === "none" && appActive && !hat;
   useEffect(() => {
+    if (!cameraLive || demo) return;
+    const t = setInterval(() => dispatchReach({ type: "tick", at: Date.now(), cameraUp: true }), 5000);
+    return () => clearInterval(t);
+  }, [cameraLive, dispatchReach]);
+  useEffect(() => {
     cameraStartedAt.current = cameraLive && cameraReady ? Date.now() : 0;
   }, [cameraLive, cameraReady]);
 
@@ -908,7 +973,7 @@ function Main() {
     if (token !== speakToken.current) return;
     if (answer.error) haptic.error();
     else haptic.success();
-    say(answer.spokenText, speakLang(s), { token });
+    say(answer.spokenText, speakLang(s, answer), { token });
   };
 
   /** cancel: the user left (Done, swipe, another sheet): stop recording and drop the question. */
@@ -941,7 +1006,7 @@ function Main() {
     const target = voiceTarget.current;
     if (target === "hat") return void submitHatInput(text, "voice");
     if (target === "book") return void askBook(text);
-    if (target === "photo") return void ask(text);
+    if (target === "photo") return void ask(micContext.current ? `${micContext.current} ${text}` : text);
     if (target === "history") return void runAsk(text);
     // Main screen: questions about earlier scans (or any question before there's a photo) go to
     // "Ask your history"; anything else is a follow-up about the last photo.
@@ -1072,7 +1137,7 @@ function Main() {
             if (live.current.screenReader) AccessibilityInfo.announceForAccessibility("History cleared");
           } else {
             haptic.error();
-            Alert.alert("Couldn't clear history", "Check the server connection and try again.");
+            Alert.alert(HISTORY_UNAVAILABLE, "Nothing was cleared. Try again in a minute.");
           }
         },
       },
@@ -1140,15 +1205,19 @@ function Main() {
     const b = bookRef.current;
     const image = bookPhotos.current[b.pageIndex];
     if (!image) return dispatchBook({ type: "answered" });
-    const r = await analyze({ image, mode: "read", question: text });
+    // Book mode (the page's exact text) and the earlier questions about this page.
+    const turns = bookTurns.current.page === b.pageIndex ? bookTurns.current.turns : [];
+    const r = await analyze(bookQuestion(image, text, turns));
     if (bookRef.current.status !== "asking") return;
+    if (!r.error) bookTurns.current = { page: b.pageIndex, turns: trimConversation([...turns, { question: text, answer: r.spokenText }]) };
     dispatchBook({ type: "answered" }); // paused: "Resume" continues from the same sentence
-    speech.speak(r.spokenText, "en-US", { owner: "book-answer" });
+    speech.speak(r.spokenText, answerLang("read", "English", r.spokenLanguage), { owner: "book-answer" });
   }
 
   const startBook = () => {
     haptic.capture();
     bookPhotos.current = [];
+    bookTurns.current = { page: -1, turns: [] };
     dispatchBook({ type: "start" });
   };
 
@@ -1322,7 +1391,7 @@ function Main() {
     dispatchCaption(r.error ? { type: "failed", message: r.spokenText } : { type: "answered" });
     if (r.error) haptic.error();
     else haptic.success();
-    say(r.spokenText, mode === "translate" ? languageCode(language) : "en-US", { token });
+    say(r.spokenText, answerLang(mode, language, r.spokenLanguage), { token });
     const wantsLookup = !r.error && (r.autoLookup || (r.webQuery && r.itemKind && r.itemKind !== "none"));
     if (wantsLookup) void runLookup(next, true, r.autoLookup ? "autoLookup" : "automatic");
   }
@@ -1594,9 +1663,12 @@ function Main() {
               </View>
             ) : connection.state === "down" && !demo ? (
               <Pressable
-                onPress={() => setSheet("settings")}
+                onPress={() => {
+                  setFocusServer(true); // straight to Settings > Server
+                  setSheet("settings");
+                }}
                 accessibilityRole="button"
-                accessibilityLabel="Can't reach the SightLine server. Open settings."
+                accessibilityLabel="Can't reach the SightLine server. Opens the server address in Settings."
               >
                 <Frost style={s.captionPill}>
                   <Icon sf="wifi.exclamationmark" ion="cloud-offline-outline" size={18} color={colors.label} />
@@ -1797,7 +1869,10 @@ function Main() {
         onStop={() => speech.stop()}
         onRate={(rate) => update({ rate })}
         onAsk={(q) => void ask(q)}
-        onMic={() => void toggleMic("photo")}
+        onMic={(context) => {
+          if (!recording) micContext.current = context ?? ""; // a dish from the menu view, or none
+          void toggleMic("photo");
+        }}
         onRetry={retry}
         onLookup={() => shot && void runLookup(shot, false)}
       />
@@ -1808,6 +1883,7 @@ function Main() {
         voices={voices}
         speaking={speaking}
         historyOn={historyOn}
+        focusServer={focusServer}
         onClearHistory={confirmClearHistory}
         hatStatus={hat ? hatCam.status : null}
         onConnectHat={(deviceId, pairCode) => {

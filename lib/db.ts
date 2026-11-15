@@ -112,6 +112,11 @@ export function dbConfigured(): boolean {
   return Boolean(process.env.DATABASE_URL);
 }
 
+/** Configured and not failing: false for a minute after a database call failed. */
+export function dbAvailable(): boolean {
+  return dbConfigured() && Date.now() - failedAt >= BACKOFF_MS;
+}
+
 function sql(): Sql | null {
   if (client === undefined) {
     client = process.env.DATABASE_URL ? neon(process.env.DATABASE_URL) : null;
@@ -225,15 +230,36 @@ export async function putCachedAnalysis(key: string, response: AnalyzeResponse) 
   );
 }
 
-export async function getCachedLookup(key: string): Promise<LookupResponse | undefined> {
+const NO_IMAGE_TTL_SECONDS = 10 * 60;
+
+/** A cached lookup is reused for 24 hours, but one saved without the picture it could have had
+ *  for only 10 minutes, so a later lookup can fill the picture in. */
+export function lookupStillFresh(
+  response: LookupResponse,
+  ageSeconds: number,
+  imageExpected: boolean,
+): boolean {
+  const ttl = imageExpected && !response.image ? NO_IMAGE_TTL_SECONDS : CACHE_TTL_HOURS * 3600;
+  return ageSeconds < ttl;
+}
+
+export async function getCachedLookup(
+  key: string,
+  opts: { imageExpected?: boolean } = {},
+): Promise<LookupResponse | undefined> {
   const rows = await withDb(
     "lookup cache read",
     (db) =>
-      db`SELECT response FROM lookup_cache
+      db`SELECT response, EXTRACT(EPOCH FROM now() - created_at)::float AS age_s FROM lookup_cache
          WHERE key = ${key} AND created_at > now() - make_interval(hours => ${CACHE_TTL_HOURS})`,
     READ_TIMEOUT_MS,
   );
-  return (rows?.[0]?.response as LookupResponse | undefined) ?? undefined;
+  const row = rows?.[0];
+  const response = row?.response as LookupResponse | undefined;
+  if (!response) return undefined;
+  return lookupStillFresh(response, Number(row?.age_s) || 0, opts.imageExpected === true)
+    ? response
+    : undefined;
 }
 
 /** A cached barcode answer: 7 days for a product that was found, 1 hour for a miss. */

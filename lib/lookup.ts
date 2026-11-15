@@ -27,7 +27,8 @@ const TOTAL_BUDGET_MS = 15_000;
 /** Bump when the summary prompt changes, so cached summaries from older rules aren't reused. */
 const LOOKUP_PROMPT_VERSION = "2026-11-14.4";
 const SUMMARY_RESERVE_MS = 4_000; // time kept back for the Claude summary
-const IMAGE_GRACE_MS = 300; // how long a finished summary waits for a still-running image search
+/** How long a finished summary waits for the image search, which runs alongside it from the start. */
+export const IMAGE_GRACE_MS = 1_500;
 
 const QUERY_SCHEMA = {
   type: "object",
@@ -177,12 +178,12 @@ function formatResults(results: SearchResult[]): string {
     .join("\n\n");
 }
 
-/** The image search's result if it's done now or within a short grace period; never waits longer. */
-async function settleImage(p: Promise<ImageCandidate[]> | null): Promise<ImageCandidate[]> {
+/** The image search's result if it's done now or within `graceMs`; never waits longer. */
+async function settleImage(p: Promise<ImageCandidate[]> | null, graceMs: number): Promise<ImageCandidate[]> {
   if (!p) return [];
   return Promise.race([
     p.then((r) => r ?? []),
-    new Promise<ImageCandidate[]>((r) => setTimeout(() => r([]), IMAGE_GRACE_MS)),
+    new Promise<ImageCandidate[]>((r) => setTimeout(() => r([]), Math.max(0, graceMs))),
   ]);
 }
 
@@ -221,12 +222,21 @@ export async function webLookup(
   const scanId = isScanId(body.scanId) ? body.scanId : undefined;
 
   /** Reply with a finished lookup; cache it and save it to the scan (after the response, or now). */
-  const done = async (result: LookupResponse, o: { cacheKey: string; fromCache: boolean }) => {
+  const done = async (
+    result: LookupResponse,
+    o: { cacheKey: string; fromCache: boolean; lateImage?: () => Promise<string | undefined> },
+  ) => {
     const save = async () => {
-      if (!o.fromCache && !result.error && result.sources.length) {
-        await putCachedLookup(o.cacheKey, result);
-      }
+      const cacheable = !o.fromCache && !result.error && result.sources.length > 0;
+      if (cacheable) await putCachedLookup(o.cacheKey, result);
       if (device && scanId) await attachLookup(scanId, device, result);
+      // The picture came too late for this answer: save it once it lands, for the next lookup.
+      const late = cacheable && opts.persist !== "await" ? await o.lateImage?.() : undefined;
+      if (late) {
+        const filled = { ...result, image: late };
+        await putCachedLookup(o.cacheKey, filled);
+        if (device && scanId) await attachLookup(scanId, device, filled);
+      }
     };
     if (opts.persist === "await") await save();
     else after(save);
@@ -271,15 +281,16 @@ export async function webLookup(
     // 2. Seen this exact search in the last 24 hours? Answer from the Neon cache.
     // The version makes summaries written under older prompt rules miss the cache.
     const cacheKey = `${lookupKey(query, kind, language)}|${brand.toLowerCase()}|${LOOKUP_PROMPT_VERSION}`;
-    const hit = await getCachedLookup(cacheKey);
+    // Pictures only of this item: the result's words must name its brand and product. With no
+    // brand known for a product, any picture could be a look-alike from another brand: none.
+    const heroAllowed = kind !== "none" && Boolean(brand || !BRANDED_KINDS.has(kind));
+    // An answer saved without the picture it could have had is reused for 10 minutes only.
+    const hit = await getCachedLookup(cacheKey, { imageExpected: heroAllowed });
     if (hit) return done(hit, { cacheKey, fromCache: true });
 
     // 3. Google results through Bright Data, with a picture of the item searched in parallel.
-    // Pictures only of this item: the result's words must name its brand and product. With no
-    // brand known for a product, any picture could be a look-alike from another brand: none.
     const id = identityWords(query, brand);
     const isItem = (text: string) => matchesItem(text, id);
-    const heroAllowed = kind !== "none" && Boolean(brand || !BRANDED_KINDS.has(kind));
     const imagePromise = heroAllowed
       ? searchImage(imageQuery(query), Math.max(2_000, remaining() - 1_000))
       : null;
@@ -355,9 +366,16 @@ export async function webLookup(
       : [];
     const pick = used.length ? [...new Set(used)].map((n) => results[n - 1]) : results.slice(0, 3);
     // A full-size picture from Google Images if it's ready, else a thumbnail Google showed.
+    // Waits at most IMAGE_GRACE_MS after the summary, and never past the total budget.
+    const pickImage = (found: ImageCandidate[]) =>
+      [...found, ...serpImages].find((c) => isItem(c.text))?.url;
     const image = heroAllowed
-      ? [...(await settleImage(imagePromise)), ...serpImages].find((c) => isItem(c.text))?.url
+      ? pickImage(await settleImage(imagePromise, Math.min(IMAGE_GRACE_MS, deadline - Date.now())))
       : undefined;
+    const lateImage =
+      heroAllowed && !image && imagePromise
+        ? async () => pickImage(await imagePromise.catch(() => []))
+        : undefined;
     const toSource = (r: SearchResult): LookupSource => ({
       title: r.title,
       url: r.url,
@@ -392,7 +410,7 @@ export async function webLookup(
         ...(image ? { image } : {}),
         sources: pick.map(toSource),
       },
-      { cacheKey, fromCache: false },
+      { cacheKey, fromCache: false, lateImage },
     );
   } catch (error) {
     if (error instanceof Anthropic.APIConnectionTimeoutError) {

@@ -45,6 +45,12 @@ export type ItemKind = "none" | "food_drink" | "product" | "medicine" | "restaur
 // Item-dependent groups chosen by the server (Nutrition, Ingredients, Warnings, Full text, ...).
 export type Section = { title: string; body: string; provenance?: "label" | "web" };
 
+// A restaurant menu, structured by the server (Menu mode, or Auto choosing menu).
+export const MENU_TAGS = ["vegetarian", "vegan", "gluten_free", "spicy", "contains_nuts"] as const;
+export type MenuTag = (typeof MENU_TAGS)[number];
+export type MenuItem = { name: string; price?: string; priceValue?: number; description?: string; tags?: MenuTag[] };
+export type Menu = { name?: string; sections: { title: string; items: MenuItem[] }[] };
+
 export type AnalyzeResponse = {
   spokenText: string;
   details: string;
@@ -54,6 +60,8 @@ export type AnalyzeResponse = {
   scanId?: string; // server-side history id; passed back to /api/lookup
   interpreted?: { mode: Mode; question?: string; language?: string }; // how an utterance was read
   autoLookup?: boolean; // "search for this": run /api/lookup right after
+  spokenLanguage?: string; // the language spokenText is in ("es"), so a matching voice reads it
+  menu?: Menu; // a menu's dishes by section (shown as MenuView); sections stay the fallback
   brand?: string; // the item's brand (from a printed barcode, or as printed); passed to /api/lookup
   barcode?: BarcodeResult; // a barcode printed in the photo, found (its sections arrive merged)
   httpStatus?: number; // set by the client

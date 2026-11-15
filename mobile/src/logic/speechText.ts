@@ -87,6 +87,13 @@ export function speakNumbers(text: string, lang = "en-US"): string {
   out = out.replace(new RegExp(`${B}(\\d{1,3})(st|nd|rd|th)${E}`, "g"), (_m, n: string) => ordinal(Number(n)));
   // Money: $12.76, $5, "7.50 dollars".
   out = out.replace(/\$(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{2}))?(?![\d])/g, (_m, w: string, c?: string) => money(w, c));
+  // Price ranges where one "dollars" covers both ends: "6.50 to 24 dollars". Whole-dollar
+  // ranges ("7 to 24 dollars") are left for the plain numbers below.
+  out = out.replace(
+    new RegExp(`${B}(\\d+)(?:\\.(\\d{2}))?(?: to |\\s?[-–]\\s?)(\\d+)(?:\\.(\\d{2}))? dollars${E}`, "g"),
+    (m, w1: string, c1: string | undefined, w2: string, c2: string | undefined) =>
+      c1 || c2 ? `${money(w1, c1)} to ${money(w2, c2)}` : m,
+  );
   out = out.replace(new RegExp(`${B}(\\d+)\\.(\\d{2}) dollars${E}`, "g"), (_m, w: string, c: string) => money(w, c));
   // Month/year: 08/2027.
   out = out.replace(new RegExp(`${B}(0?[1-9]|1[0-2])/((?:19|20)\\d{2})${E}`, "g"), (_m, m: string, y: string) => `${MONTHS[Number(m) - 1]} ${year(Number(y))}`);

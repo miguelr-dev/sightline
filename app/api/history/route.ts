@@ -13,7 +13,9 @@ export async function GET(request: Request) {
   }
   const raw = Number(new URL(request.url).searchParams.get("limit") ?? 20);
   const limit = Number.isFinite(raw) ? Math.min(100, Math.max(1, Math.floor(raw))) : 20;
-  const scans = (await listScans(device, limit)) ?? [];
+  const scans = await listScans(device, limit);
+  // The database is configured but failing: say so, rather than looking like an empty history.
+  if (!scans) return Response.json({ scans: [], error: "unavailable" }, { status: 503, headers });
   return Response.json({ scans } satisfies HistoryResponse, { headers });
 }
 
@@ -25,6 +27,11 @@ export async function DELETE(request: Request) {
       headers,
     });
   }
-  const deleted = (await clearScans(device)) ?? 0;
+  if (!dbConfigured()) return Response.json({ deleted: 0 }, { headers });
+  const deleted = await clearScans(device);
+  // Never report "cleared" when the database didn't answer.
+  if (deleted === undefined) {
+    return Response.json({ deleted: 0, error: "unavailable" }, { status: 503, headers });
+  }
   return Response.json({ deleted }, { headers });
 }

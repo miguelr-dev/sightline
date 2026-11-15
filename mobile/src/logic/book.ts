@@ -1,6 +1,8 @@
 // Book mode (tested in book.test.ts): read a page sentence by sentence, wait for a page turn,
 // skip a re-captured same page, read the new one. The UI runs the effects.
 
+import { trimConversation, type Turn } from "./conversation";
+
 export type BookPage = {
   text: string;
   sentences: string[];
@@ -142,4 +144,15 @@ export function parseBookPage(v: unknown): BookPage | null {
     complete: p.complete !== false,
     ...(typeof p.cutOff === "string" && p.cutOff.trim() ? { cutOff: p.cutOff.trim() } : {}),
   };
+}
+
+/** The /api/analyze request for "Ask about this page": book mode, so the server answers from the
+ *  page's exact text, plus the earlier questions about this page so "she" or "that" resolve. */
+export function bookQuestion(
+  image: string,
+  question: string,
+  turns: Turn[],
+): { image: string; mode: "read"; book: true; question: string; conversation?: Turn[] } {
+  const conversation = trimConversation(turns);
+  return { image, mode: "read", book: true, question, ...(conversation.length ? { conversation } : {}) };
 }
