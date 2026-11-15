@@ -689,7 +689,7 @@ export function VoiceOverPanel() {
     <section id="access" aria-labelledby="access-h" className="scroll-mt-16 px-4 py-14 sm:px-6 sm:py-20">
       <div className="vo-panel">
         <Reveal className="vo-copy">
-          <p className="eyebrow eyebrow-dark">For blind and low-vision people, and travelers</p>
+          <p className="eyebrow eyebrow-dark">Accessibility</p>
           <h2 id="access-h" className="h2">
             Made to be used without looking.
           </h2>
@@ -732,7 +732,7 @@ export function VoiceOverPanel() {
               <div className="vo-bottom">
                 <div className="vo-modes">
                   <span>AUTO</span>
-                  <span>BARCODE</span>
+                  <span>READ</span>
                 </div>
                 <div className="vo-row">
                   <span className="vo-thumb">

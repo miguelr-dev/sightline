@@ -143,14 +143,12 @@ function PointDemo({ active, state }: DemoProps) {
 /* 2. Scan any barcode                                                       */
 /* ------------------------------------------------------------------------ */
 
-// The live /api/barcode answer for 90151620, the code printed on this bottle.
-// Photo: Egor Komarov on Pexels (Pexels License).
-const BARCODE_TITLE = "Almdudler Original 0,35l";
-const BARCODE_LINE = "Almdudler Original 0,35l, 350ml. No allergens listed. 27.6 grams of sugar per serving.";
+// The Kirkland Signature Sparkling Tropical can, photographed for the demo; the answer is the live
+// /api/barcode (Open Food Facts) result for its barcode.
 const BARCODE_ROWS = [
-  { name: "Nutrition", text: "Calories: 116 · Sugar: 27.6 g · Fat: 0 g" },
-  { name: "Allergens", text: "No allergens listed." },
-  { name: "Score", text: "Nutri-Score: D" },
+  { name: "Nutrition", text: "250% of the daily value of vitamin B12." },
+  { name: "Ingredients", text: "No artificial food dyes. No high fructose corn syrup." },
+  { name: "Allergens", text: "" },
 ];
 
 function BarcodeDemo({ active, state }: DemoProps) {
@@ -160,26 +158,26 @@ function BarcodeDemo({ active, state }: DemoProps) {
   return (
     <DemoCard
       title={["Scan any", "barcode"]}
-      description={`SightLine finds the barcode printed on an Almdudler bottle, looks it up on Open Food Facts, and says: ${BARCODE_LINE}`}
+      description="SightLine finds the barcode on the back of a Kirkland Signature Sparkling Tropical can, looks it up on Open Food Facts, and reads the nutrition and ingredients: 250% of the daily value of vitamin B12, no artificial food dyes, no high fructose corn syrup."
       frozen={state.paused}
     >
       <Scene
         eager
-        src="/new/almdudler-bottle.jpg"
-        alt="Close-up of a frosted amber Almdudler bottle with a bottle-shaped barcode, the number 9015 1620 and 350 ml printed on the glass."
-        ratio={[640, 1000]}
-        fx={50}
+        src="/new/barcode.webp"
+        alt="The back of a Kirkland Signature can held in a hand, showing its barcode and recycling label."
+        ratio={[500, 610]}
+        fx={57}
       >
         <Brackets
           show={t >= 150 && t < 2400}
-          box={locked ? { l: 33, t: 30.5, w: 35, h: 42.5 } : { l: 20, t: 16, w: 62, h: 70 }}
+          box={locked ? { l: 37.5, t: 31, w: 45, h: 42 } : { l: 30, t: 14, w: 56, h: 68 }}
         >
           <span className="dc-scan" data-on={on(t >= 250 && t < 1500)} />
         </Brackets>
       </Scene>
-      <ModeChip>BARCODE</ModeChip>
+      <ModeChip>AUTO</ModeChip>
       <Sheet show={t >= 2200} label="Barcode · Open Food Facts" speaking={t >= 2600 && t < 6000}>
-        <p className="dc-title">{BARCODE_TITLE}</p>
+        <p className="dc-title">Kirkland Signature Sparkling Tropical</p>
         <div className="dc-rows">
           {BARCODE_ROWS.map((row, i) => (
             <div key={row.name} className="dc-row" data-on={on(open === i)}>

@@ -134,7 +134,6 @@ export const FAQS = [
   { q: "Which languages can it translate?", a: "English, Spanish, French, German, Italian, Portuguese, Chinese, Japanese, Korean, Arabic, Hindi, Vietnamese, and Tagalog." },
   { q: "Is my photo saved?", a: "No. Photos are never stored. SightLine keeps the text of recent answers for this device so you can ask about them later, and you can clear that history in Settings." },
   { q: "Does it work with VoiceOver and TalkBack?", a: "Yes. Every control is labelled, answers are announced by your screen reader, and text follows your phone's text size. Turn Auto-speak off so SightLine doesn't talk over it." },
-  { q: "What is the hat camera?", a: "A small camera you clip to a cap. It sends what it sees to SightLine, and your phone reads it out loud, so both hands stay free." },
   { q: "Does it work offline?", a: "Not yet. SightLine needs a connection to describe a photo. Offline reading is on our roadmap." },
   { q: "How accurate is it?", a: "Very good on clear, well-lit photos. When it isn't sure, it says so and tells you how to retake the photo. For medicine, always double-check with a pharmacist." },
 ];

@@ -141,11 +141,6 @@ export function SettingsSheet(props: {
         </div>
       </Group>
 
-      {features?.hat && (
-        <Group label="Hat camera" note="Connect the hat camera from the SightLine iPhone app. Its answers are read aloud on the phone it's paired with." >
-          <div className={`${card} px-4 py-3 text-[15px] text-[#3A3A3C]`}>Pairing a hat isn&apos;t available in the browser.</div>
-        </Group>
-      )}
 
       <Group label="Speech">
         <div className={card}>

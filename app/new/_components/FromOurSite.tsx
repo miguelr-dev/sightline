@@ -59,7 +59,7 @@ const AUDIENCES = [
     img: IMG.bottle,
     alt: "A prescription bottle of Nateglinide tablets.",
     pos: "50% 55%",
-    ticks: ["Works with VoiceOver, or speaks for itself", "Medicine doses and warnings read word for word", "Tells you if a finger covers the text, and how to fix it"],
+    ticks: ["Spots what you’re holding and offers to read it", "Medicine doses and warnings read word for word", "Tells you if a finger covers the text, and how to fix it"],
   },
   {
     title: "Can’t read it?",
@@ -67,7 +67,7 @@ const AUDIENCES = [
     img: IMG.menu,
     alt: "A chalkboard Menú del día beside café tables on a narrow street in Seville.",
     pos: "50% 50%",
-    ticks: ["13 languages, each with its own voice", "Menus with prices and allergens", "Ask “what comes with it?” about the same photo"],
+    ticks: ["Spoken in a voice for your language", "Menus with prices and allergens", "Ask “what comes with it?” about the same photo"],
   },
 ];
 
