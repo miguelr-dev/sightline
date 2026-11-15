@@ -328,6 +328,49 @@ function SignDemo({ active, state }: DemoProps) {
 }
 
 /* ------------------------------------------------------------------------ */
+/* Read any label                                                            */
+/* ------------------------------------------------------------------------ */
+
+// The live /api/analyze answer for this photo, word for word.
+// Photo: Juno Jo on Unsplash (Unsplash License).
+const LABEL_LINE =
+  "Bixby Roasting Co. Light Roast coffee, 12 ounces. Bright and balanced, with Kona, Colombia and Costa Rica beans.";
+
+function LabelDemo({ active, state }: DemoProps) {
+  const t = useDemoClock(active, state, 7000, 6200);
+  const said = wordsAt(t, 2800, 160, LABEL_LINE.split(" ").length);
+  // The white label at the top of the bag.
+  const label: Box = { l: 32, t: 20, w: 34, h: 26 };
+  return (
+    <DemoCard
+      title={["Read any", "label"]}
+      description={`A hand holds up a bag of coffee. SightLine reads the label and says: ${LABEL_LINE}`}
+      frozen={state.paused}
+    >
+      <Scene
+        eager
+        src="/new/coffee-bag.jpg"
+        alt="A hand holding up a kraft-paper bag of Bixby Roasting Co. Light Roast coffee in front of striped green leaves."
+        ratio={[750, 1000]}
+        fx={50}
+      >
+        <Brackets
+          show={t >= 200 && t < 2500}
+          box={t < 400 ? { l: 22, t: 14, w: 58, h: 76 } : { l: 26, t: 19, w: 48, h: 66 }}
+        />
+        <span className="dc-sweep" data-on={on(t >= 1100 && t < 2300)} style={boxStyle(label)} />
+      </Scene>
+      <ModeChip>AUTO</ModeChip>
+      <Sheet show={t >= 2500} label="Auto · Label" speaking={said > 0 && t < 5700}>
+        <p className="dc-say">
+          <Words text={LABEL_LINE} shown={said} />
+        </p>
+      </Sheet>
+    </DemoCard>
+  );
+}
+
+/* ------------------------------------------------------------------------ */
 /* Carousel                                                                  */
 /* ------------------------------------------------------------------------ */
 
@@ -336,6 +379,7 @@ function SignDemo({ active, state }: DemoProps) {
 const SLIDES: CoverflowSlide[] = [
   { label: "Point at anything", duration: 6500, render: (a, s) => <PointDemo active={a} state={s} /> },
   { label: "Scan any barcode", duration: 6500, render: (a, s) => <BarcodeDemo active={a} state={s} /> },
+  { label: "Read any label", duration: 6700, render: (a, s) => <LabelDemo active={a} state={s} /> },
   { label: "Ask about the menu", duration: 6700, render: (a, s) => <MenuDemo active={a} state={s} /> },
   { label: "Read any book aloud", duration: 6900, render: (a, s) => <BookDemo active={a} state={s} /> },
   { label: "Read any sign", duration: 6700, render: (a, s) => <SignDemo active={a} state={s} /> },
