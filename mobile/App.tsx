@@ -33,6 +33,7 @@ import {
   setDeviceId,
   transcribe,
 } from "./src/api";
+import { BrandMark } from "./src/components/BrandMark";
 import { CamButton, Frost, LastThumb, ModeStrip, Shutter } from "./src/components/CameraChrome";
 import { RecentSheet, type AskState } from "./src/components/RecentSheet";
 import { ResultSheet } from "./src/components/ResultSheet";
@@ -1812,6 +1813,7 @@ function Main() {
       {hat ? (
         <View style={[s.top, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
           <View style={[s.wordmark, { backgroundColor: colors.surface }]} accessibilityRole="header">
+            <BrandMark size={26} />
             <Text style={[type.headline, { fontWeight: "700" }]} maxFontSizeMultiplier={1.6} numberOfLines={1}>
               SightLine
             </Text>
@@ -1977,6 +1979,9 @@ const s = StyleSheet.create({
   },
   autoPillOn: { backgroundColor: colors.primary },
   wordmark: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
     flexShrink: 1,
     marginRight: 10,
     backgroundColor: colors.bg,

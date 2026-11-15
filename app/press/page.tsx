@@ -45,9 +45,19 @@ export default function PressPage() {
             <LogoMark size={96} onLight />
           </div>
           <div className="mark" style={{ background: "#F2F2F7" }}>
-            <LogoMark size={96} />
+            <LogoMark size={96} onLight />
           </div>
         </div>
+        <p>
+          Open line is SightLine&apos;s S monogram. Use black on light surfaces and white on dark surfaces.
+          Keep the shape and its clear space intact.
+        </p>
+        <p style={{ display: "flex", flexWrap: "wrap", gap: 20 }}>
+          <a href="/brand/logo-black.svg" download>Black logo (SVG)</a>
+          <a href="/brand/logo-white.svg" download>White logo (SVG)</a>
+          <a href="/brand/mark-black.svg" download>Symbol (SVG)</a>
+          <a href="/brand/app-icon-1024.png" download>App icon (1024 px PNG)</a>
+        </p>
         <h2>Colors and type</h2>
         <p>
           Black #000000 and white #FFFFFF, with grays #55555A and #F2F2F7 in the app. Website type: Atkinson Hyperlegible for body text and Inter

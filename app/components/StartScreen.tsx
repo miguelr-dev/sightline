@@ -1,5 +1,7 @@
 "use client";
 
+import { BrandMark } from "./BrandMark";
+
 // The first screen of /app (what the QR code opens). Dark like the marketing site and the camera,
 // set in the site's display face, with one decision: whether SightLine speaks its answers. The same
 // switch is Settings > Auto-speak, so the choice can be changed at any time.
@@ -7,16 +9,6 @@
 const display = { fontFamily: "var(--font-display), system-ui, sans-serif" };
 const focusRing =
   "focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-[3px] focus-visible:outline-[#5CE1FF]";
-
-function Mark() {
-  return (
-    <svg width={30} height={30} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-      <rect x="1" y="1" width="30" height="30" rx="8" fill="#fff" />
-      <ellipse cx="16" cy="16" rx="11" ry="6.8" fill="none" stroke="#000" strokeWidth="2.6" />
-      <circle cx="16" cy="16" r="3.6" fill="#000" />
-    </svg>
-  );
-}
 
 const speakerIcon = (
   <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -41,7 +33,7 @@ export function StartScreen({ voice, onVoice, onStart }: { voice: boolean; onVoi
     <main className="min-h-dvh bg-black text-white">
       <div className="mx-auto flex min-h-dvh w-full max-w-[460px] flex-col px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(1.25rem,env(safe-area-inset-top))]">
         <header className="flex items-center gap-2.5">
-          <Mark />
+          <BrandMark size={30} color="#ffffff" />
           <span style={display} className="text-[19px] font-bold tracking-[-0.02em]">
             SightLine
           </span>

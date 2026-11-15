@@ -1,3 +1,5 @@
+import { BrandMark } from "./BrandMark";
+
 // Small inline icon set. Icons are decorative: every control that uses one also
 // has a text label, so they are hidden from assistive tech.
 
@@ -121,14 +123,8 @@ export const ImageIcon = (p: IconProps) => (
   </Icon>
 );
 
-/** App mark: an eye with a solid pupil. */
-export const LogoMark = ({ size = 32 }: { size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-    <rect width="32" height="32" rx="8" fill="#000" stroke="var(--accent)" strokeWidth="2" />
-    <ellipse cx="16" cy="16" rx="11" ry="6.8" fill="none" stroke="var(--accent)" strokeWidth="2.6" />
-    <circle cx="16" cy="16" r="3.6" fill="var(--accent)" />
-  </svg>
-);
+/** Approved Open line brand symbol; mode icons remain descriptive. */
+export const LogoMark = ({ size = 32 }: { size?: number }) => <BrandMark size={size} />;
 
 export const MODE_ICONS: Record<Mode, (p: IconProps) => ReactNode> = {
   read: TextIcon,

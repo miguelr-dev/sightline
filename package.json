@@ -14,7 +14,8 @@
     "sim": "node --env-file=.env.local hardware/sim-board.mjs",
     "flash": "./hardware/flash.sh",
     "voiceover": "node --env-file=.env.local scripts/voiceover.mjs",
-    "env:push": "node --env-file=.env.local scripts/push-env.mjs"
+    "env:push": "node --env-file=.env.local scripts/push-env.mjs",
+    "brand:generate": "node scripts/brand-assets.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",

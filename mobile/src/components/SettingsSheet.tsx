@@ -15,6 +15,7 @@ import { LANGUAGES, type Features, type Voice } from "../modes";
 import { ENV_API_URL, normalizeUrl, RATES, type Settings } from "../settings";
 import { colors, MIN_TARGET, radius, type } from "../theme";
 import type { HatStatus } from "../useHatCamera";
+import { BrandMark } from "./BrandMark";
 import { Segmented } from "./Segmented";
 import { Icon, PillButton } from "./ui";
 
@@ -363,6 +364,11 @@ export function SettingsSheet({
             <Text style={[type.footnote, s.groupLabel]}>
               Default: {ENV_API_URL || "not set"}. Photos go to this server to be described.
             </Text>
+          </View>
+          <View style={{ alignItems: "center", gap: 8, paddingVertical: 16 }}>
+            <BrandMark size={44} />
+            <Text style={type.headline}>SightLine</Text>
+            <Text style={type.footnote}>Point your camera. Hear the world.</Text>
           </View>
         </ScrollView>
       </View>

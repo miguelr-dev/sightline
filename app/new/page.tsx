@@ -1,7 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import Link from "next/link";
-import { ArrowRight, Scan } from "lucide-react";
+import { ArrowRight } from "lucide-react";
+
+import { BrandMark } from "../components/BrandMark";
 
 import { AppQr } from "./_components/AppQr";
 import { HeroCarousel } from "./_components/HeroCarousel";
@@ -55,7 +57,7 @@ function Wordmark() {
   return (
     <span className="inline-flex items-center gap-2.5">
       <span className="grid size-8 place-items-center rounded-[10px] bg-[#0a0a0a]" aria-hidden>
-        <Scan className="size-[18px] text-[#ffd60a]" strokeWidth={2.6} />
+        <BrandMark size={26} color="#ffffff" />
       </span>
       <span className="text-[19px] font-semibold tracking-[-0.03em]">SightLine</span>
     </span>

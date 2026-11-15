@@ -1,3 +1,5 @@
+import { BrandMark } from "../BrandMark";
+
 // Decorative icons for the marketing site. Every control that uses one also has a text
 // label, so they are hidden from assistive tech.
 
@@ -5,14 +7,7 @@ type P = { size?: number; className?: string };
 const base = { "aria-hidden": true, focusable: false } as const;
 
 export function LogoMark({ size = 34, onLight = false }: { size?: number; onLight?: boolean }) {
-  const fg = onLight ? "#000" : "#fff";
-  return (
-    <svg width={size} height={size} viewBox="0 0 32 32" {...base}>
-      {!onLight && <rect x="1" y="1" width="30" height="30" rx="8" fill="#000" />}
-      <ellipse cx="16" cy="16" rx="11" ry="6.8" fill="none" stroke={fg} strokeWidth="2.6" />
-      <circle cx="16" cy="16" r="3.6" fill={fg} />
-    </svg>
-  );
+  return <BrandMark size={size} color={onLight ? "#000000" : "#ffffff"} />;
 }
 
 export const ArrowRight = ({ size = 18 }: P) => (

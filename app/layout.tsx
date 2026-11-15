@@ -31,10 +31,10 @@ export const metadata: Metadata = {
   appleWebApp: { capable: true, title: "SightLine", statusBarStyle: "black-translucent" },
   icons: {
     icon: [
-      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
-      { url: "/icons/icon.svg", type: "image/svg+xml" },
+      { url: "/icons/icon-192.png?v=open-line-1", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon.svg?v=open-line-1", type: "image/svg+xml" },
     ],
-    apple: "/icons/apple-touch-icon.png",
+    apple: "/icons/apple-touch-icon.png?v=open-line-1",
   },
 };
 
