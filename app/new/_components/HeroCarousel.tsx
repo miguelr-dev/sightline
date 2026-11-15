@@ -11,7 +11,6 @@ import {
 
 import {
   Brackets,
-  MENU,
   ModeChip,
   Scene,
   Screen,
@@ -144,10 +143,14 @@ function PointDemo({ active, state }: DemoProps) {
 /* 2. Scan any barcode                                                       */
 /* ------------------------------------------------------------------------ */
 
+// The live /api/barcode answer for 90151620, the code printed on this bottle.
+// Photo: Egor Komarov on Pexels (Pexels License).
+const BARCODE_TITLE = "Almdudler Original 0,35l";
+const BARCODE_LINE = "Almdudler Original 0,35l, 350ml. No allergens listed. 27.6 grams of sugar per serving.";
 const BARCODE_ROWS = [
-  { name: "Nutrition", text: "250% of the daily value of vitamin B12." },
-  { name: "Ingredients", text: "No artificial food dyes. No high fructose corn syrup." },
-  { name: "Allergens", text: "" },
+  { name: "Nutrition", text: "Calories: 116 · Sugar: 27.6 g · Fat: 0 g" },
+  { name: "Allergens", text: "No allergens listed." },
+  { name: "Score", text: "Nutri-Score: D" },
 ];
 
 function BarcodeDemo({ active, state }: DemoProps) {
@@ -157,26 +160,26 @@ function BarcodeDemo({ active, state }: DemoProps) {
   return (
     <DemoCard
       title={["Scan any", "barcode"]}
-      description="SightLine finds the barcode on the back of a Kirkland Signature Sparkling Tropical can, looks it up on Open Food Facts, and reads the nutrition and ingredients: 250% of the daily value of vitamin B12, no artificial food dyes, no high fructose corn syrup."
+      description={`SightLine finds the barcode printed on an Almdudler bottle, looks it up on Open Food Facts, and says: ${BARCODE_LINE}`}
       frozen={state.paused}
     >
       <Scene
         eager
-        src="/new/barcode.webp"
-        alt="The back of a Kirkland Signature can held in a hand, showing its barcode and recycling label."
-        ratio={[500, 610]}
-        fx={57}
+        src="/new/almdudler-bottle.jpg"
+        alt="Close-up of a frosted amber Almdudler bottle with a bottle-shaped barcode, the number 9015 1620 and 350 ml printed on the glass."
+        ratio={[640, 1000]}
+        fx={50}
       >
         <Brackets
           show={t >= 150 && t < 2400}
-          box={locked ? { l: 37.5, t: 31, w: 45, h: 42 } : { l: 30, t: 14, w: 56, h: 68 }}
+          box={locked ? { l: 33, t: 30.5, w: 35, h: 42.5 } : { l: 20, t: 16, w: 62, h: 70 }}
         >
           <span className="dc-scan" data-on={on(t >= 250 && t < 1500)} />
         </Brackets>
       </Scene>
       <ModeChip>BARCODE</ModeChip>
       <Sheet show={t >= 2200} label="Barcode · Open Food Facts" speaking={t >= 2600 && t < 6000}>
-        <p className="dc-title">Kirkland Signature Sparkling Tropical</p>
+        <p className="dc-title">{BARCODE_TITLE}</p>
         <div className="dc-rows">
           {BARCODE_ROWS.map((row, i) => (
             <div key={row.name} className="dc-row" data-on={on(open === i)}>
@@ -201,8 +204,12 @@ function BarcodeDemo({ active, state }: DemoProps) {
 /* 4. Ask about the menu                                                     */
 /* ------------------------------------------------------------------------ */
 
-const MENU_QUESTION = "How much was the first one?";
-const MENU_ANSWER = "The Grilled Chicken Plate is 12 dollars and 79 cents.";
+// The live /api/analyze answer to this question about this photo, word for word.
+// Photo: Christoph Birken on Unsplash (Unsplash License).
+const MENU_QUESTION = "How much is the avocado toast?";
+const MENU_ANSWER = "Avocado toast is 14 euros on the à la carte brunch menu.";
+/** "Avocado toast 14", in the photo's own percentages (909 × 1000). */
+const AVOCADO_ROW: Box = { l: 31.5, t: 23.6, w: 14, h: 2.2 };
 
 function MenuDemo({ active, state }: DemoProps) {
   const t = useDemoClock(active, state, 7000, 6000);
@@ -211,11 +218,17 @@ function MenuDemo({ active, state }: DemoProps) {
   return (
     <DemoCard
       title={["Ask about", "the menu"]}
-      description={`You hold the mic and ask, “${MENU_QUESTION}” SightLine remembers the Retro Family Restaurant menu you scanned and answers: ${MENU_ANSWER}`}
+      description={`You hold the mic and ask, “${MENU_QUESTION}” SightLine remembers the brunch menu you scanned outside a Paris café and answers: ${MENU_ANSWER}`}
       frozen={state.paused}
     >
-      <Scene eager src={MENU.src} alt={MENU.alt} ratio={MENU.ratio} fx={31}>
-        <span className="dc-mark" data-on={on(t >= 2250)} style={boxStyle(MENU.firstRow)} />
+      <Scene
+        eager
+        src="/new/paris-brunch-menu.jpg"
+        alt="A printed brunch menu on a green café front in Paris: brunch à la carte, pasta, salads, meat, fish, desserts and crêpes, each with a price."
+        ratio={[909, 1000]}
+        fx={53}
+      >
+        <span className="dc-mark" data-on={on(t >= 2250)} style={boxStyle(AVOCADO_ROW)} />
       </Scene>
       <div className="dc-ask" data-on={on(t >= 450)} aria-hidden>
         <small>You asked</small>
@@ -227,7 +240,7 @@ function MenuDemo({ active, state }: DemoProps) {
       <span className="dc-mic" data-on={on(t >= 200 && t < 2500)} aria-hidden>
         <Mic strokeWidth={2.2} />
       </span>
-      <Sheet show={t >= 2500} label="Ask · Retro Family menu" speaking={said > 0 && t < 5000}>
+      <Sheet show={t >= 2500} label="Ask · Brunch menu" speaking={said > 0 && t < 5000}>
         <p className="dc-say">
           <Words text={MENU_ANSWER} shown={said} />
         </p>
@@ -240,27 +253,40 @@ function MenuDemo({ active, state }: DemoProps) {
 /* 5. Read any book aloud                                                    */
 /* ------------------------------------------------------------------------ */
 
+// The first sentences of the page, as /api/analyze book mode split them, word for word.
+// The page is from a 19th-century edition of the Mabinogion (public domain).
+// Photo: Erol Ahmed on Unsplash (Unsplash License).
 const BOOK_SENTENCES = [
-  "The house on the hill had been empty for years.",
-  "Nobody in the village could say who had lived there last.",
-  "But on the first cold night of autumn, a light came on in the attic window.",
-  "Maya saw it from her bedroom and pressed her face to the glass.",
+  "Now this is how Arthur hunted the stag.",
+  "The men and the dogs were divided into hunting-parties, and the dogs were let loose upon the stag.",
+  "And the last dog that was let loose was the favorite dog of Arthur; Cavall was his name.",
 ];
 
 function BookDemo({ active, state }: DemoProps) {
   const t = useDemoClock(active, state, 7200, 3600);
-  const current = t < 300 ? -1 : Math.min(BOOK_SENTENCES.length - 1, Math.floor((t - 300) / 1550));
+  const current = t < 2700 ? -1 : Math.min(BOOK_SENTENCES.length - 1, Math.floor((t - 2700) / 1500));
+  // The page's text block, from the chapter heading down.
+  const text: Box = { l: 35.5, t: 31, w: 50, h: 51 };
   return (
     <DemoCard
       title={["Read any", "book aloud"]}
-      description="Book mode reads a printed page aloud and highlights each sentence as it is spoken, then carries on after you turn the page."
+      description={`Book mode reads an open page of the Mabinogion aloud, highlighting each sentence as it is spoken: ${BOOK_SENTENCES.join(" ")}`}
       frozen={state.paused}
+      screen="#f3f3f1"
     >
-      <div className="dc-book" aria-hidden>
-        <div className="dc-book-h">
-          Page 37
-          <span>Book</span>
-        </div>
+      <Scene
+        eager
+        src="/new/geraint-page.jpg"
+        alt="An old green clothbound book open on white sheets at Chapter VI, Geraint, the Son of Erbin, continued, with a blue ribbon bookmark."
+        ratio={[755, 1000]}
+        fx={60}
+        width="186cqw"
+        top="-32cqw"
+      >
+        <Brackets show={t >= 200 && t < 2300} box={t < 400 ? { l: 22, t: 12, w: 70, h: 80 } : text} />
+      </Scene>
+      <ModeChip>BOOK</ModeChip>
+      <Sheet show={t >= 2300} label="Book · Chapter VI" speaking={current >= 0}>
         {BOOK_SENTENCES.map((sentence, i) => (
           <p key={i} className="dc-s" data-on={on(i === current)}>
             {sentence}
@@ -280,7 +306,7 @@ function BookDemo({ active, state }: DemoProps) {
             Next page
           </span>
         </div>
-      </div>
+      </Sheet>
     </DemoCard>
   );
 }
@@ -290,30 +316,30 @@ function BookDemo({ active, state }: DemoProps) {
 /* ------------------------------------------------------------------------ */
 
 // The live /api/analyze answer for this photo, word for word.
-const SIGN_LINE =
-  "Ciao! sandwich board: open daily for lunch and dinner, 11 AM to 9 PM, hot pasta to go.";
+// Photo: Erik Mclean on Unsplash (Unsplash License).
+const SIGN_LINE = "Sidewalk closed. Pedestrians must go left. No access to King Street.";
 
 function SignDemo({ active, state }: DemoProps) {
   const t = useDemoClock(active, state, 7000, 6200);
-  const said = wordsAt(t, 2800, 150, SIGN_LINE.split(" ").length);
-  // The sign's lettering, from OPEN down to the web address.
-  const text: Box = { l: 35.5, t: 16.5, w: 39.5, h: 76 };
+  const said = wordsAt(t, 2800, 190, SIGN_LINE.split(" ").length);
+  // The three signs' lettering, from SIDEWALK CLOSED down to KING ST.
+  const text: Box = { l: 30.5, t: 29, w: 40.5, h: 56.5 };
   return (
     <DemoCard
       title={["Read any", "sign"]}
-      description={`A red sandwich board outside a pasta shop. SightLine reads it and says: ${SIGN_LINE}`}
+      description={`Three orange signs on a city sidewalk. SightLine reads them and says: ${SIGN_LINE}`}
       frozen={state.paused}
     >
       <Scene
         eager
-        src="/new/ciao-sign.webp"
-        alt="A red sandwich board on the pavement: Open. Ciao! Hot pasta-to-go. Open daily, serving lunch and dinner, 11 AM to 9 PM, with a phone number and ciaopasta.com."
-        ratio={[864, 1080]}
-        fx={60}
+        src="/new/sidewalk-closed.jpg"
+        alt="Orange construction signs on a city sidewalk: Sidewalk closed, a pedestrian with an arrow pointing left, and No access to King St."
+        ratio={[668, 1000]}
+        fx={50}
       >
         <Brackets
           show={t >= 200 && t < 2500}
-          box={t < 400 ? { l: 31, t: 4, w: 58, h: 93 } : { l: 33.5, t: 11, w: 50, h: 85 }}
+          box={t < 400 ? { l: 20, t: 20, w: 60, h: 74 } : { l: 27.5, t: 26.5, w: 46, h: 61.5 }}
         />
         <span className="dc-sweep" data-on={on(t >= 1100 && t < 2300)} style={boxStyle(text)} />
       </Scene>

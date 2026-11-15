@@ -619,30 +619,7 @@ body:has(.sl-new) {
     transform: none;
   }
 
-  /* Book mode: a white page with the spoken sentence highlighted. */
-  .dc-book {
-    position: absolute;
-    inset: 0;
-    z-index: 3;
-    padding: 17cqw 6.5cqw 0;
-    background: #ffffff;
-  }
-  .dc-book-h {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    margin-bottom: 3.4cqw;
-    font-size: 5.6cqw;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-  }
-  .dc-book-h span {
-    font-size: 3.2cqw;
-    font-weight: 650;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: #55555a;
-  }
+  /* Book mode: the page's sentences, the spoken one highlighted. */
   .dc-s {
     margin: 0 -2cqw 1.6cqw;
     padding: 1cqw 2cqw;
@@ -664,21 +641,8 @@ body:has(.sl-new) {
     color: #000000;
     text-decoration-color: #000000;
   }
-  .dc-book::after {
-    content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: calc(var(--bleed) + 36cqw);
-    background: linear-gradient(rgba(255, 255, 255, 0), #ffffff 32%);
-  }
   .dc-ctrl {
-    position: absolute;
-    z-index: 1;
-    left: 5cqw;
-    right: 5cqw;
-    bottom: calc(var(--bleed) + 6cqw);
+    margin: 3.4cqw -1cqw 0;
     display: grid;
     grid-template-columns: 1fr 1.1fr 1fr;
     gap: 2.2cqw;
