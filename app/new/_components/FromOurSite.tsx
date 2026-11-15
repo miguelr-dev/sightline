@@ -63,11 +63,11 @@ const AUDIENCES = [
   },
   {
     title: "Can’t read it?",
-    body: "For travelers. Point at a street sign, a train notice or a menu in another language and hear it in yours, with unfamiliar dishes explained.",
+    body: "For people with dyslexia or other reading difficulties, and for travelers. Point at a letter, a form, a sign or a menu, even one in another language, and hear it read in yours.",
     img: IMG.menu,
     alt: "A chalkboard Menú del día beside café tables on a narrow street in Seville.",
     pos: "50% 50%",
-    ticks: ["Spoken in a voice for your language", "Menus with prices and allergens", "Ask “what comes with it?” about the same photo"],
+    ticks: ["Long text read aloud, at your speed", "Spoken in a voice for your language", "Ask “what does this mean?” about the same photo"],
   },
 ];
 
