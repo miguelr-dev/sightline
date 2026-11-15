@@ -6,6 +6,7 @@ import { ArrowRight } from "lucide-react";
 import { BrandMark } from "../components/BrandMark";
 
 import { AppQr } from "./_components/AppQr";
+import { Audiences, Faq, Film, Privacy, Stat } from "./_components/FromOurSite";
 import { HeroCarousel } from "./_components/HeroCarousel";
 import { LiveDemo } from "./_components/LiveDemo";
 import { Reveal } from "./_components/motion";
@@ -19,6 +20,7 @@ import {
   Voices,
 } from "./_components/Sections";
 import "./new.css";
+import "./polish.css";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -48,9 +50,10 @@ const BUILT_WITH = [
 
 const NAV = [
   { href: "#how", label: "How it works" },
+  { href: "#demo", label: "Demo" },
   { href: "#try", label: "Try a sample" },
   { href: "#access", label: "Accessibility" },
-  { href: "#built", label: "Built with" },
+  { href: "#faq", label: "FAQ" },
 ];
 
 function Wordmark() {
@@ -79,7 +82,7 @@ export default function NewLanding() {
           aria-label="Main"
           className="mx-auto flex h-16 max-w-[1200px] items-center justify-between gap-4 px-4 sm:px-6"
         >
-          <Link href="/new" aria-label="SightLine home" className="rounded-lg">
+          <Link href="/" aria-label="SightLine home" className="rounded-lg">
             <Wordmark />
           </Link>
           <div className="flex items-center gap-1 sm:gap-2">
@@ -127,14 +130,20 @@ export default function NewLanding() {
           <HeroCarousel />
         </section>
 
+        {/* The problem, then how it works, the voiced film, and a sample to try. */}
+        <Stat />
         <HowItWorks />
+        <Film />
         <LiveDemo />
         <Answers />
         <FromTheWeb />
         <Remembers />
         <Voices />
         <HandsFree />
+        <Audiences />
         <VoiceOverPanel />
+        <Privacy />
+        <Faq />
 
         {/* Built with */}
         <section id="built" aria-labelledby="built-h" className="scroll-mt-16 py-14 sm:py-20">
