@@ -7,7 +7,7 @@ type P = { size?: number; className?: string };
 const base = { "aria-hidden": true, focusable: false } as const;
 
 export function LogoMark({ size = 34, onLight = false }: { size?: number; onLight?: boolean }) {
-  return <BrandMark size={size} color={onLight ? "#000000" : "#ffffff"} />;
+  return <BrandMark size={size} color={onLight ? "#000000" : "currentColor"} />;
 }
 
 export const ArrowRight = ({ size = 18 }: P) => (
