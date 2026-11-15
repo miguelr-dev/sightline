@@ -162,9 +162,10 @@ Accessibility is the product, so it was designed in from the start:
 
 ## Team
 
-<!-- TODO: add names, roles, and links -->
-- TODO: Name, role
-- TODO: Name, role
+Built at SanD Hacks Fall 2026, UC San Diego.
+
+- **Mark Guggenheim** ([@Markgugg](https://github.com/Markgugg)): iPhone app, server and AI pipeline, hat camera hardware, landing page.
+- **Miguel Reese** ([@miguelr-dev](https://github.com/miguelr-dev)): web app, website and demo film, voice (ElevenLabs), deployment.
 
 ## What's next
 
