@@ -18,3 +18,17 @@
 .sl-new .try-tag-live::before {
   background: #34c759;
 }
+
+/* Section credits ("A voice you choose · with ElevenLabs"): a quiet line in the eyebrow's own grey,
+   not a bordered sponsor badge. The Built with section near the end is the main credit. */
+.sl-new .eyebrow-by {
+  padding: 0;
+  margin-left: -4px;
+  box-shadow: none;
+  font-size: inherit;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+.sl-new .eyebrow-by::before {
+  content: "· with ";
+}
