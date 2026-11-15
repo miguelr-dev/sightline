@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { MODE_LABELS, type AskResponse, type Features, type HistoryScan, type Mode, type Section, type Voice } from "@/lib/modes";
 import { listenOnce, recognitionSupported, type Listener } from "@/lib/voice";
+import { BrandMark } from "./BrandMark";
 
 // Settings and Recent scans for the web app (/app), matching the iPhone app's sheets
 // (mobile/src/components/SettingsSheet.tsx and RecentSheet.tsx): white page sheets with grouped
@@ -125,6 +126,13 @@ export function SettingsSheet(props: {
 
   return (
     <Sheet title="Settings" onClose={props.onClose}>
+      <div className="flex flex-col items-center gap-1.5 py-2 text-center">
+        <span className="grid size-14 place-items-center rounded-[14px] bg-black text-white" aria-hidden="true">
+          <BrandMark size={34} />
+        </span>
+        <p className="text-[17px] font-semibold">SightLine</p>
+        <p className="text-[13px] text-[#55555A]">Point your camera. Hear the world.</p>
+      </div>
       <Group label="Camera">
         <div className={card}>
           <SwitchRow
@@ -491,7 +499,10 @@ export function RecentSheet(props: {
       ) : !features?.history ? (
         <p className="text-[17px] text-[#3A3A3C]">Scan history isn&apos;t set up on this server.</p>
       ) : scans === null ? (
-        <p className="text-[17px] text-[#3A3A3C]">Couldn&apos;t load your scans. Check the connection and try again.</p>
+        <div role="status" className="flex flex-col items-center gap-1 py-6 text-center">
+          <p className="text-[17px] font-semibold">History is unavailable right now</p>
+          <p className="text-[15px] text-[#3A3A3C]">Your scans are safe. Try again in a minute.</p>
+        </div>
       ) : scans.length === 0 ? (
         <p className="text-[17px] text-[#3A3A3C]">Nothing yet. Things you scan show up here.</p>
       ) : (
