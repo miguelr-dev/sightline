@@ -14,9 +14,11 @@ export const IMG = {
   medicinePortrait: "/site/medicine-portrait.webp",
 };
 
-export const HERO_LINE = "A fixed-price lunch for 14 euros 90. Bread and a glass of wine are included.";
+// The menu lines follow what the live app says for this photo in Translate mode (checked 14 Nov):
+// the board lists dishes and one price, with no meal named, so no "lunch".
+export const HERO_LINE = "Today's set menu for 14 euros 90: a starter, a main and dessert, with bread and a glass of wine.";
 export const MENU_LINE =
-  "This is a Spanish menu of the day, a fixed-price lunch for 14 euros 90. Bread and a glass of wine are included.";
+  "Today's set menu, 14 euros 90: gazpacho or mixed salad, then today's stew or roast pork with potatoes, then fruit, ice cream or coffee. Bread and a glass of wine included.";
 
 export type ModeKey = "read" | "describe" | "menu" | "translate";
 
@@ -69,7 +71,7 @@ export const SAMPLES = [
     mode: "Translate",
     img: IMG.menu,
     alt: "A chalkboard Menú del día in Spanish beside café tables in Seville.",
-    said: "This is a Spanish chalkboard menu of the day, a fixed-price lunch for 14 euros 90. First course: Andalusian gazpacho, a cold tomato and vegetable soup, or a mixed salad. Second course: today's stew, or Iberian pork roast in its own juices with potatoes. Dessert: fresh fruit, ice cream, or coffee. Bread and a glass of wine are included.",
+    said: "This is a Spanish chalkboard menu of the day, a set menu for 14 euros 90. First course: Andalusian gazpacho, a cold tomato and vegetable soup, or a mixed salad. Second course: today's stew, or Iberian pork roast in its own juices with potatoes. Dessert: fresh fruit, ice cream, or coffee. Bread and a glass of wine are included.",
   },
   {
     title: "Street sign",
