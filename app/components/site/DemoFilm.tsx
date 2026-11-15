@@ -420,7 +420,7 @@ export function DemoFilm() {
               “Menu detected. Tap to read.” The user taps it, and SightLine says: “{MENU_LINE}”
             </li>
             <li>Just ask. From the answer, the user asks, “{ASK}” SightLine says: “{ANSWER}”</li>
-            <li>Read any sign. The camera points at a street sign in Logroño, Spain: “{SIGN_ES}” SightLine says: “This is a Spanish sign. It says: {SIGN_EN}”</li>
+            <li>Translate a sign. The camera points at a street sign in Logroño, Spain: “{SIGN_ES}” SightLine says: “This is a Spanish sign. It says: {SIGN_EN}”</li>
             <li>
               Know what you&apos;re holding. A box of prescription tablets is held close. SightLine reads: “Methylprednisolone tablets, 4
               milligrams. Sandoz, 21 tablets, prescription only. Day 1: 2 tablets before breakfast, 1 after lunch, 1 after supper, 2 at
