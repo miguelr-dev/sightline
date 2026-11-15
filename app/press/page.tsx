@@ -72,7 +72,7 @@ export default function PressPage() {
         <p className="meta">Photo credits are listed at the bottom of every page.</p>
         <h2>Press contact</h2>
         <p>
-          <a href="mailto:hello@sightline.example">hello@sightline.example</a>
+          <a href="https://github.com/miguelr-dev/sightline/issues">Open an issue on GitHub</a>
         </p>
       </article>
     </SiteShell>
