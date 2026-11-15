@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import * as React from "react";
 import {
   ChevronDown,
@@ -18,6 +17,8 @@ import {
   type CoverflowSlide,
   type CoverflowSlideState,
 } from "@/components/ui/coverflow-carousel";
+
+import { Brackets, ModeChip, Scene, Screen, Sheet, Words, boxStyle, on, wordsAt, type Box } from "./demo-parts";
 
 /* ------------------------------------------------------------------------ */
 /* Demo clock                                                                */
@@ -42,7 +43,7 @@ function useDemoClock(active: boolean, state: CoverflowSlideState, length: numbe
     if (!running) return;
     let last = performance.now();
     let frame = requestAnimationFrame(function tick(now) {
-      const step = now - last;
+      const step = Math.max(0, now - last);
       last = now;
       setElapsed((value) => (value + step >= length ? 0 : value + step));
       frame = requestAnimationFrame(tick);
@@ -56,26 +57,9 @@ function useDemoClock(active: boolean, state: CoverflowSlideState, length: numbe
   return elapsed;
 }
 
-/** How many words of a line have been "spoken" at time `t`. */
-function wordsAt(t: number, start: number, perWord: number, total: number) {
-  if (t < start) return 0;
-  return Math.min(total, Math.floor((t - start) / perWord) + 1);
-}
-
-const on = (value: boolean) => (value ? "" : undefined);
-
 /* ------------------------------------------------------------------------ */
-/* Building blocks                                                           */
+/* Card                                                                      */
 /* ------------------------------------------------------------------------ */
-
-type Box = { l: number; t: number; w: number; h: number };
-
-const boxStyle = (box: Box): React.CSSProperties => ({
-  left: `${box.l}%`,
-  top: `${box.t}%`,
-  width: `${box.w}%`,
-  height: `${box.h}%`,
-});
 
 function DemoCard({
   title,
@@ -100,133 +84,9 @@ function DemoCard({
       </p>
       <p className="sr-only">{description}</p>
       <div className="dc-phone">
-        <div className="dc-screen" style={screen ? { background: screen } : undefined}>
-          {children}
-          <div className="dc-island" aria-hidden />
-        </div>
+        <Screen screen={screen}>{children}</Screen>
       </div>
     </div>
-  );
-}
-
-/** The camera photo, sized like object-fit: cover, so overlays can be placed
-    in the photo's own percentages. `fx` is the focal point, as a % of width. */
-function Scene({
-  src,
-  alt,
-  ratio,
-  fx = 50,
-  width,
-  top,
-  children,
-}: {
-  src: string;
-  alt: string;
-  ratio: [number, number];
-  fx?: number;
-  width?: string;
-  top?: string;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div
-      className="dc-scene"
-      style={
-        {
-          "--ar": `${ratio[0]} / ${ratio[1]}`,
-          "--arn": ratio[0] / ratio[1],
-          "--fx": `${fx}%`,
-          ...(width ? { "--w": width } : {}),
-          ...(top ? { "--top": top } : {}),
-        } as React.CSSProperties
-      }
-    >
-      <Image
-        src={src}
-        alt={alt}
-        fill
-        sizes="(max-width: 640px) 70vw, 340px"
-        loading="eager"
-        draggable={false}
-        className="dc-photo"
-      />
-      <div className="dc-scrim" aria-hidden />
-      <div className="dc-overlay" aria-hidden>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function Brackets({ show, box, children }: { show: boolean; box: Box; children?: React.ReactNode }) {
-  return (
-    <div className="dc-brk" data-on={on(show)} style={boxStyle(box)}>
-      <i />
-      <i />
-      <i />
-      <i />
-      {children}
-    </div>
-  );
-}
-
-function Wave({ on: speaking }: { on: boolean }) {
-  return (
-    <span className="dc-wave" data-on={on(speaking)} aria-hidden>
-      {[0.55, 0.9, 0.7, 1, 0.6].map((h, i) => (
-        <i key={i} style={{ "--h": h } as React.CSSProperties} />
-      ))}
-    </span>
-  );
-}
-
-function Words({ text, shown }: { text: string; shown: number }) {
-  return (
-    <>
-      {text.split(" ").map((word, i) => (
-        <React.Fragment key={i}>
-          <span className="dc-w" data-on={on(i < shown)}>
-            {word}
-          </span>{" "}
-        </React.Fragment>
-      ))}
-    </>
-  );
-}
-
-function Sheet({
-  show,
-  label,
-  speaking,
-  badge,
-  children,
-}: {
-  show: boolean;
-  label: string;
-  speaking: boolean;
-  badge?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="dc-sheet" data-on={on(show)} aria-hidden>
-      <div className="dc-grab" />
-      <div className="dc-meta">
-        <span className="dc-meta-l">
-          {badge}
-          {label}
-        </span>
-        <Wave on={speaking} />
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function ModeChip({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="dc-chip" aria-hidden>
-      {children}
-    </span>
   );
 }
 
@@ -249,6 +109,7 @@ function PointDemo({ active, state }: DemoProps) {
       frozen={state.paused}
     >
       <Scene
+        eager
         src="/new/kirkland.webp"
         alt="A hand holding an orange Kirkland Signature Sparkling Energy Drink can in a classroom."
         ratio={[640, 1130]}
@@ -297,6 +158,7 @@ function BarcodeDemo({ active, state }: DemoProps) {
       frozen={state.paused}
     >
       <Scene
+        eager
         src="/new/barcode.webp"
         alt="The back of a Kirkland Signature can held in a hand, showing its barcode and recycling label."
         ratio={[500, 610]}
@@ -350,6 +212,7 @@ function RecallDemo({ active, state }: DemoProps) {
       frozen={state.paused}
     >
       <Scene
+        eager
         src="/new/pills.webp"
         alt="White tablets in a blister pack, seen up close."
         ratio={[278, 440]}
@@ -398,6 +261,7 @@ function MenuDemo({ active, state }: DemoProps) {
       frozen={state.paused}
     >
       <Scene
+        eager
         src="/new/menu.webp"
         alt="The Harbor Table lunch menu, with starters, mains and desserts."
         ratio={[720, 960]}
@@ -492,6 +356,7 @@ function SignDemo({ active, state }: DemoProps) {
       frozen={state.paused}
     >
       <Scene
+        eager
         src="/new/sign.webp"
         alt="A red Spanish street sign reading Precaución, Obras en la acera, Cruce por el otro lado, above a Calle Mayor sign."
         ratio={[760, 1302]}
@@ -540,8 +405,8 @@ export function HeroCarousel() {
     <CoverflowCarousel
       slides={SLIDES}
       label="SightLine demos"
-      aspectRatio={9 / 16}
-      cardWidth="clamp(236px, 66vw, 316px)"
+      aspectRatio={0.55}
+      cardWidth="clamp(220px, 60vw, 316px)"
       rotate={38}
       depth={0.5}
       perspective={3.2}
