@@ -30,7 +30,7 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "SightLine: Point. Hear. Know.",
   description:
-    "An AI copilot for blind and low-vision people. Point your iPhone at a menu, a can, a medicine box or a sign, and hear what matters.",
+    "An AI copilot for blind and low-vision people. Point your phone at a menu, a can, a medicine box or a sign, and hear what matters.",
 };
 
 export const viewport: Viewport = {
@@ -112,7 +112,7 @@ export default function NewLanding() {
               Point. Hear. <span className="mark">Know.</span>
             </h1>
             <p className="sr-only">
-              SightLine is an AI copilot for blind and low-vision people. Point your iPhone at a menu, a can, a
+              SightLine is an AI copilot for blind and low-vision people. Point your phone at a menu, a can, a
               medicine box or a sign, and it tells you what matters, out loud.
             </p>
             <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
