@@ -2,12 +2,29 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CHAPTERS, FILM_LENGTH, IMG, MENU_LINE } from "./content";
-import { Chevron, LogoMark, Pause, Play, Wave } from "./Icons";
+import { Chevron, LogoMark, Pause, Play, Speaker, SpeakerOff, Wave } from "./Icons";
 import { PhoneMock, type PhoneState } from "./PhoneMock";
 import { useReducedMotion } from "./useMotion";
 
 // A code-driven product film: one clock (t, in seconds) drives the phone mockup and the
-// captions. Nothing here is a recording; every frame is computed from t.
+// captions. Nothing here is a recording; every frame is computed from t. With sound on, Matilda
+// (the app's ElevenLabs voice) reads each chapter's answer, and the captions follow her pace.
+
+// public/site/voice/<id>.mp3, made with the app's own /api/speak (Matilda, Flash v2.5), so it
+// sounds exactly like the app. `at` is when the line starts within its chapter; `dur` is the
+// clip's length in seconds.
+const VOICE = [
+  { id: "menu", ch: 0, at: 5, dur: 18.3 },
+  { id: "answer", ch: 1, at: 5.2, dur: 8.0 },
+  { id: "sign", ch: 2, at: 6.5, dur: 3.9 },
+  { id: "label", ch: 3, at: 4, dur: 14.2 },
+  { id: "end", ch: 4, at: 1, dur: 2.6 },
+] as const;
+type VoiceId = (typeof VOICE)[number]["id"];
+const voice = (id: VoiceId) => VOICE.find((v) => v.id === id)!;
+/** How far through its clip a line is (0 to 1) at chapter time `lt`. */
+const progress = (id: VoiceId, lt: number) => Math.max(0, Math.min(1, (lt - voice(id).at) / voice(id).dur));
+const voicing = (id: VoiceId, lt: number) => lt >= voice(id).at && lt < voice(id).at + voice(id).dur;
 
 function words(str: string, n: number) {
   const w = str.split(" ");
@@ -38,10 +55,10 @@ type Frame = {
 const ASK = "How much is it, and what comes with it?";
 const ANSWER = "It’s 14 euros 90 for the whole set menu: a first course, a main, dessert, bread, and a glass of wine.";
 const MENU_WORDS = MENU_LINE.split(" ").length;
-const MENU_RATE = 4; // words a second from 5 s; the literal translation must end by 15 s
 const SIGN_ES = "Prohibido uso de monopatín.";
 const SIGN_EN = "Skateboarding prohibited.";
-const LABEL_LINES = ["Methylprednisolone tablets, 4 mg", "Sandoz · 21 tablets · prescription only", "Day 1: 2 tablets before breakfast", "1 after lunch, 1 after supper", "2 at bedtime"];
+const LABEL_LINES: string[] = ["Methylprednisolone tablets, 4 mg", "Sandoz · 21 tablets · prescription only", "Day 1: 2 tablets before breakfast", "1 after lunch, 1 after supper", "2 at bedtime"];
+const LABEL_CHARS = LABEL_LINES.reduce((n, l) => n + l.length, 0);
 
 function frameAt(t: number): Frame {
   const ci = chapterAt(t);
@@ -63,9 +80,9 @@ function frameAt(t: number): Frame {
       phone.vfClass = "track"; // the brackets lock onto the menu board
     }
     phone.status = lt >= 3.3 && lt < 4.6 ? "Reading…" : null;
-    const n = Math.floor((lt - 5) * MENU_RATE);
+    const n = lt < voice("menu").at ? 0 : Math.ceil(progress("menu", lt) * MENU_WORDS);
     f.caption = lt < 1.4 ? "" : lt < 4.6 ? "Menu detected. Tap to read." : words(MENU_LINE, n);
-    f.speaking = n > 0 && n < MENU_WORDS + 1;
+    f.speaking = voicing("menu", lt);
     // The same sections the app shows for a translated menu.
     if (lt >= 4.6) phone.sheet = { mode: "Auto · Translate", img: IMG.menu, text: words(MENU_LINE, n), sections: ["Translation", "Original text"], speaking: f.speaking };
   } else if (ci === 1) {
@@ -76,9 +93,9 @@ function frameAt(t: number): Frame {
     const typing = lt >= 0.8 && lt < 4.4;
     f.question = ASK.slice(0, Math.max(0, Math.floor((lt - 0.8) * 13)));
     f.showQuestion = lt >= 1;
-    const n = Math.floor((lt - 5.2) * 3.2);
+    const n = lt < voice("answer").at ? 0 : Math.ceil(progress("answer", lt) * ANSWER.split(" ").length);
     f.caption = words(ANSWER, n);
-    f.speaking = n > 0 && n < 22;
+    f.speaking = voicing("answer", lt);
     phone.sheet = {
       mode: "Auto · Translate",
       img: IMG.menu,
@@ -96,7 +113,7 @@ function frameAt(t: number): Frame {
     if (lt >= 6.5) {
       const k = Math.floor((lt - 6.5) * 9);
       f.caption = k >= SIGN_EN.length ? SIGN_EN : SIGN_EN.slice(0, k) + SIGN_ES.slice(k);
-      f.speaking = k > 0 && k < SIGN_EN.length + 10;
+      f.speaking = voicing("sign", lt);
     } else if (lt >= 4) {
       f.caption = SIGN_ES;
     }
@@ -114,10 +131,13 @@ function frameAt(t: number): Frame {
     phone.thumb = IMG.sign;
     phone.zoom = lt >= 0.9 ? 2 : 1; // small print: tap 2× before the photo
     shoot();
-    const idx = Math.floor((lt - 4) / 1.8);
+    // Highlight each line while Matilda reads it (lines take time in proportion to their length).
+    const p = progress("label", lt) * LABEL_CHARS;
+    let idx = 0;
+    for (let acc = 0; idx < LABEL_LINES.length && acc + LABEL_LINES[idx].length <= p; idx++) acc += LABEL_LINES[idx].length;
     f.showCaption = lt < 4;
     f.lines = lt >= 4 ? LABEL_LINES.map((text, i) => ({ text, cls: i < idx ? "done" : i === idx ? "now" : "" })) : [];
-    f.speaking = lt >= 4 && idx < LABEL_LINES.length;
+    f.speaking = voicing("label", lt);
     if (lt >= 4)
       phone.sheet = {
         mode: "Menu / Label",
@@ -138,7 +158,10 @@ export function DemoFilm() {
   const [t, setT] = useState(0);
   const [playing, setPlaying] = useState(true);
   const [visible, setVisible] = useState(false);
+  const [sound, setSound] = useState(false); // off until tapped: browsers block sound that starts by itself
   const ref = useRef<HTMLDivElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const clipRef = useRef<VoiceId | null>(null);
 
   // Only run the clock while the film is on screen.
   useEffect(() => {
@@ -150,11 +173,44 @@ export function DemoFilm() {
   }, []);
 
   const running = playing && visible && !reduced;
+  // The clock follows real time (not "+0.1 per tick"), so it stays in step with the voice.
   useEffect(() => {
     if (!running) return;
-    const id = setInterval(() => setT((x) => (x + 0.1 >= FILM_LENGTH ? 0 : x + 0.1)), 100);
+    let last = performance.now();
+    const id = setInterval(() => {
+      const now = performance.now();
+      const dt = Math.min(0.5, (now - last) / 1000);
+      last = now;
+      setT((x) => (x + dt >= FILM_LENGTH ? 0 : x + dt));
+    }, 100);
     return () => clearInterval(id);
   }, [running]);
+
+  // Sound: play the line that belongs at time t, and keep it in step if the clock drifts or jumps.
+  useEffect(() => {
+    const a = audioRef.current;
+    if (!a) return;
+    const ci = chapterAt(t);
+    const active = sound && running ? VOICE.find((v) => v.ch === ci && voicing(v.id, t - CHAPTERS[ci].s)) : undefined;
+    if (!active) {
+      if (!a.paused) a.pause();
+      clipRef.current = null;
+      return;
+    }
+    const want = t - CHAPTERS[ci].s - active.at;
+    if (clipRef.current !== active.id) {
+      clipRef.current = active.id;
+      a.src = `/site/voice/${active.id}.mp3`;
+      a.currentTime = want;
+      void a.play().catch(() => {});
+    } else if (a.paused && !a.ended) {
+      a.currentTime = want;
+      void a.play().catch(() => {});
+    } else if (!a.paused && Math.abs(a.currentTime - want) > 1) {
+      a.currentTime = want;
+    }
+  }, [t, sound, running]);
+  useEffect(() => () => audioRef.current?.pause(), []);
 
   // Reduced motion: show the finished frame of each chapter and step with Previous / Next.
   const shownT = reduced && t < CHAPTERS[0].e - 0.6 ? CHAPTERS[0].e - 0.6 : t;
@@ -167,6 +223,33 @@ export function DemoFilm() {
     [reduced],
   );
 
+  /** The speaker icon. Turning sound on replays the current chapter so Matilda starts at its line. */
+  const toggleSound = () => {
+    if (sound) {
+      setSound(false);
+      audioRef.current?.pause();
+      return;
+    }
+    // Made and started inside the tap, so iOS Safari lets it play later.
+    const a = (audioRef.current ??= new Audio());
+    a.preload = "auto";
+    a.muted = true;
+    a.src = `/site/voice/${(VOICE.find((v) => v.ch === f.ci) ?? VOICE[0]).id}.mp3`;
+    void a
+      .play()
+      .then(() => {
+        if (clipRef.current === null) a.pause();
+        a.muted = false;
+      })
+      .catch(() => {
+        a.muted = false;
+      });
+    clipRef.current = null;
+    setSound(true);
+    setPlaying(true);
+    setT(CHAPTERS[f.ci].s);
+  };
+
   return (
     <section className="sec" id="demo" aria-labelledby="demo-h" style={{ paddingTop: 80 }}>
       <div className="wrap">
@@ -174,7 +257,7 @@ export function DemoFilm() {
         <h2 id="demo-h" className="disp sec-h" style={{ margin: "18px 0 56px" }}>
           See it work.
           <br />
-          <span style={{ color: "#8A8A8A" }}>In seventy seconds.</span>
+          <span style={{ color: "#8A8A8A" }}>In ninety seconds.</span>
         </h2>
 
         <div className="film" ref={ref}>
@@ -230,6 +313,18 @@ export function DemoFilm() {
               {playing ? <Pause /> : <Play size={18} />}
             </button>
           )}
+          {!reduced && (
+            <button
+              className={`ibtn${sound ? " p" : ""}`}
+              type="button"
+              onClick={toggleSound}
+              aria-pressed={sound}
+              aria-label={sound ? "Turn the demo's sound off" : "Turn the demo's sound on"}
+              title={sound ? "Sound on" : "Sound off"}
+            >
+              {sound ? <Speaker /> : <SpeakerOff />}
+            </button>
+          )}
           <button className="ibtn" type="button" onClick={() => jump(f.ci - 1)} aria-label="Previous chapter">
             <Chevron dir="left" />
           </button>
@@ -270,7 +365,7 @@ export function DemoFilm() {
               “Menu detected. Tap to read.” The user taps it, and SightLine says: “{MENU_LINE}”
             </li>
             <li>Just ask. From the answer, the user asks, “{ASK}” SightLine says: “{ANSWER}”</li>
-            <li>Read any sign. The camera points at a street sign in Logroño, Spain: “{SIGN_ES}” SightLine says: “{SIGN_EN}”</li>
+            <li>Read any sign. The camera points at a street sign in Logroño, Spain: “{SIGN_ES}” SightLine says: “This is a Spanish sign. It says: {SIGN_EN}”</li>
             <li>
               Know what you&apos;re holding. A box of prescription tablets is held close. SightLine reads: “Methylprednisolone tablets, 4
               milligrams. Sandoz, 21 tablets, prescription only. Day 1: 2 tablets before breakfast, 1 after lunch, 1 after supper, 2 at

@@ -97,14 +97,15 @@ export const SAMPLES = [
   },
 ];
 
+// Long enough for Matilda (the app's voice) to finish each chapter's answer; see VOICE in DemoFilm.tsx.
 export const CHAPTERS = [
-  { s: 0, e: 15, title: "It spots the menu" },
-  { s: 15, e: 28, title: "Just ask" },
-  { s: 28, e: 44, title: "Read any sign" },
-  { s: 44, e: 58, title: "Know what you’re holding" },
-  { s: 58, e: 70, title: "Hear the world" },
+  { s: 0, e: 25, title: "It spots the menu" },
+  { s: 25, e: 40, title: "Just ask" },
+  { s: 40, e: 56, title: "Read any sign" },
+  { s: 56, e: 76, title: "Know what you’re holding" },
+  { s: 76, e: 88, title: "Hear the world" },
 ];
-export const FILM_LENGTH = 70;
+export const FILM_LENGTH = 88;
 
 export const MORE_FEATURES = [
   { title: "Auto mode", body: "Leave it on Auto and SightLine works out whether you're showing it a menu, a label, a sign, or a room, and answers the right way." },
