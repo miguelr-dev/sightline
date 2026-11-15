@@ -7,6 +7,8 @@ import { PhoneMock } from "./PhoneMock";
 import { useReducedMotion } from "./useMotion";
 
 const WORDS = HERO_LINE.split(" ");
+const RATE = 4.2; // words a second, from 1.2 s
+const LOOP_S = 13; // the full menu translation shows, then holds for about 3 s
 
 export function Hero() {
   const reduced = useReducedMotion();
@@ -14,11 +16,11 @@ export function Hero() {
 
   useEffect(() => {
     if (reduced) return;
-    const id = setInterval(() => setT((x) => (x + 0.1) % 11), 100);
+    const id = setInterval(() => setT((x) => (x + 0.1) % LOOP_S), 100);
     return () => clearInterval(id);
   }, [reduced]);
 
-  const n = reduced ? WORDS.length : Math.max(0, Math.floor((t - 1.2) * 3.4));
+  const n = reduced ? WORDS.length : Math.max(0, Math.floor((t - 1.2) * RATE));
   const shown = WORDS.slice(0, n).join(" ");
   const rest = n >= WORDS.length ? "" : HERO_LINE.slice(shown.length);
 

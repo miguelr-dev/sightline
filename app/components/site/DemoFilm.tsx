@@ -37,7 +37,8 @@ type Frame = {
 
 const ASK = "How much is it, and what comes with it?";
 const ANSWER = "It’s 14 euros 90 for the whole set menu: a first course, a main, dessert, bread, and a glass of wine.";
-const MENU_WORDS = MENU_LINE.split(" ").length; // spoken at 3.2 words a second from 5 s: must end by 15 s
+const MENU_WORDS = MENU_LINE.split(" ").length;
+const MENU_RATE = 4; // words a second from 5 s; the literal translation must end by 15 s
 const SIGN_ES = "Prohibido uso de monopatín.";
 const SIGN_EN = "Skateboarding prohibited.";
 const LABEL_LINES = ["Methylprednisolone tablets, 4 mg", "Sandoz · 21 tablets · prescription only", "Day 1: 2 tablets before breakfast", "1 after lunch, 1 after supper", "2 at bedtime"];
@@ -62,7 +63,7 @@ function frameAt(t: number): Frame {
       phone.vfClass = "track"; // the brackets lock onto the menu board
     }
     phone.status = lt >= 3.3 && lt < 4.6 ? "Reading…" : null;
-    const n = Math.floor((lt - 5) * 3.2);
+    const n = Math.floor((lt - 5) * MENU_RATE);
     f.caption = lt < 1.4 ? "" : lt < 4.6 ? "Menu detected. Tap to read." : words(MENU_LINE, n);
     f.speaking = n > 0 && n < MENU_WORDS + 1;
     // The same sections the app shows for a translated menu.

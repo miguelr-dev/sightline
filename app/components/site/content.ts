@@ -14,11 +14,12 @@ export const IMG = {
   medicinePortrait: "/site/medicine-portrait.webp",
 };
 
-// The menu lines follow what the live app says for this photo in Translate mode (checked 14 Nov):
-// the board lists dishes and one price, with no meal named, so no "lunch".
-export const HERO_LINE = "Today's set menu for 14 euros 90: a starter, a main and dessert, with bread and a glass of wine.";
+// The menu lines are a literal translation of the chalkboard in the photo (public/site/menu.webp):
+// "MENÚ DEL DÍA: 1º Gazpacho andaluz, o Ensalada mixta. 2º El guiso de hoy, o Asado ibérico en su
+// jugo con patatas. POSTRE: Fruta natural, o helado, o café. Pan y copa de vino: 14'90€".
 export const MENU_LINE =
-  "Today's set menu, 14 euros 90: gazpacho or mixed salad, then today's stew or roast pork with potatoes, then fruit, ice cream or coffee. Bread and a glass of wine included.";
+  "Menu of the day: 1st: Andalusian gazpacho, or mixed salad. 2nd: Today's stew, or Iberian roast in its juices with potatoes. Dessert: Fresh fruit, or ice cream, or coffee. Bread and a glass of wine: €14.90.";
+export const HERO_LINE = MENU_LINE;
 
 export type ModeKey = "read" | "describe" | "menu" | "translate";
 
@@ -71,7 +72,7 @@ export const SAMPLES = [
     mode: "Translate",
     img: IMG.menu,
     alt: "A chalkboard Menú del día in Spanish beside café tables in Seville.",
-    said: "This is a Spanish chalkboard menu of the day, a set menu for 14 euros 90. First course: Andalusian gazpacho, a cold tomato and vegetable soup, or a mixed salad. Second course: today's stew, or Iberian pork roast in its own juices with potatoes. Dessert: fresh fruit, ice cream, or coffee. Bread and a glass of wine are included.",
+    said: "This is a Spanish chalkboard menu of the day. First course: Andalusian gazpacho, a cold tomato and vegetable soup, or a mixed salad. Second course: today's stew, or Iberian pork roast in its own juices with potatoes. Dessert: fresh fruit, ice cream, or coffee. Bread and a glass of wine: 14 euros 90.",
   },
   {
     title: "Street sign",
