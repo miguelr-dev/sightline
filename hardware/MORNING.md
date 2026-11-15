@@ -41,16 +41,27 @@ The board arrives around 6 AM and the demo is at 12:30. The steps below should t
    - ✅ A pair code
    - ✅ `DEVICE_KEY matches .env.local`
 
-7. **Set up the iPhone app** in Settings:
+7. **Restart Metro on the hotspot** in a fourth terminal. The Mac's IP changed when it joined the hotspot, so Expo Go can't load the app from the old address:
+   ```bash
+   cd mobile && npx expo start --lan --clear
+   ```
+   - Scan the new QR code with the iPhone camera to open it in Expo Go. If iOS asks for **Local Network** access, allow it.
+   - ✅ The app opens on the camera screen.
+
+8. **Set up the iPhone app** in Settings:
    - Under **Server**, enter the `http://172.20.10.x:3000` URL. It should show a check mark.
    - Under **Hat camera**, enter `hat-01` and the pair code.
 
-8. **Test it.**
+9. **Test it.**
    - Open `http://<board IP>/` on the Mac. The board IP is in the log from step 4. You should see the live picture. Make sure text isn't upside down or mirrored; if it is, see the table below.
    - Hold `public/demo/menu.jpg` (printed, or on a screen) 30 to 50 cm from the lens for 3 seconds, or press **BOOT**.
    - ✅ The LED blinks 3 times, the log shows `"reading":true`, and the phone speaks the menu within about 5 s.
 
-9. **Mount it.** Tape the board on top of the brim, tilted about 15° down, and run the cable to a power bank. On a power bank there's no log, but the LED still blinks once per frame.
+10. **Mount it.** Tape the board on top of the brim, tilted about 15° down, and run the cable to a power bank. On a power bank there's no log, so watch the **server terminal** instead: each frame shows up there as a `[frame-check] hat=hat-01 …` line.
+
+> **About the LED:** this board's maker documents no status LED on IO2, so the blinks mentioned above may never happen. If the LED stays dark, trust the log lines (board log while plugged in, server terminal on battery) instead.
+>
+> **The night before (optional):** run `./hardware/flash.sh --compile-only` once. It asks for the hotspot name and password and warms up the 46 s first build, so the morning flash is fast.
 
 ---
 
@@ -70,6 +81,10 @@ The board arrives around 6 AM and the demo is at 12:30. The steps below should t
 | **App says the hat is paired with another phone** | Only one phone can hold a hat. Tap Disconnect on the other phone, or wait 60 s after it stops polling. A `npm run sim -- --watch` on `hat-01` also counts as a phone. |
 | **Picture upside down or mirrored** (preview) | Add `#define FLIP_IMAGE 1` (upside down) or `#define MIRROR_IMAGE 1` (text reads backwards) to `secrets.h`, then run `./hardware/flash.sh`. |
 | **Want to watch the log on battery** | You can't, but plug it into the Mac and run `./hardware/flash.sh --monitor`. |
+| **Upload fails with "port busy"** (reflashing) | The serial log from the last flash still has the port open. Press Ctrl+C in that terminal, then run `./hardware/flash.sh` again. |
+| **`FB-OVF` or garbled frames** (board log) | Dense frames don't fit the camera buffer at top quality. Add `#define JPEG_QUALITY 12` to `secrets.h` and reflash. |
+| **Phone app won't load / spins** | Metro is on the old IP. Redo step 7: `cd mobile && npx expo start --lan --clear` and rescan the QR code. |
+| **Hat goes silent after a blip** | One database error pauses the hat for about 60 s. Wait a minute, or press BOOT after it recovers. If Wi-Fi dropped, open Personal Hotspot on the iPhone for a moment so the board can find it again. |
 
 ## Fallback: no board, or the board dies
 
@@ -80,4 +95,4 @@ npm run sim -- --hat hat-01 --webcam   # the Mac's FaceTime camera (allow Camera
 npm run sim -- --hat hat-01            # or cycle through the demo photos
 ```
 
-Press Enter in that terminal to "press BOOT". The default hat ID is `hat-01`, so the phone doesn't need re-pairing. If the iPhone is the Continuity Camera, `--camera 1` picks the built-in camera.
+Press Enter in that terminal to "press BOOT". `--hat hat-01` is required (there's no default), and using the same ID as the board means the phone doesn't need re-pairing. If the iPhone is the Continuity Camera, `--camera 1` picks the built-in camera.
