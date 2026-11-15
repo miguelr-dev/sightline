@@ -18,11 +18,3 @@
 .sl-new .try-tag-live::before {
   background: #34c759;
 }
-
-/* How it works is three plain steps now (no animated phone beside them), so show them on phones too;
-   new.css hid them there because the phone had its own step chips. */
-@media (max-width: 767px) {
-  .sl-new .steps {
-    display: grid;
-  }
-}

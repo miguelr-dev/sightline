@@ -21,11 +21,15 @@ import {
 } from "lucide-react";
 
 import {
+  Brackets,
   MENU,
+  ModeChip,
   Phone,
   Scene,
+  Sheet,
   Wave,
   Words,
+  boxStyle,
   on,
   wordCount,
   wordsAt,
@@ -121,18 +125,32 @@ function FeatureRow({
 /* 1. How it works                                                           */
 /* ------------------------------------------------------------------------ */
 
-// Three plain steps. The animated phone that used to sit here was dropped: the hero carousel and
-// the demo film already show a menu being read and asked about.
-// Still used by HandsFree below (not on the page now, kept in case it comes back).
+// The live /api/analyze answer for the menu photo, trimmed to fit.
 const HOW_SUMMARY = "Retro Family Restaurant menu: six sections, 1.99 to 16.49 dollars.";
+const HOW_QUESTION = "How much was the first one?";
+const HOW_ANSWER = "The Grilled Chicken Plate is 12 dollars and 79 cents.";
 
 const STEPS = [
-  { name: "Point", body: "Aim at a menu, a can, a medicine box or a sign." },
-  { name: "Hear", body: "It says what matters first, out loud." },
-  { name: "Ask", body: "Hold the mic and ask about what you scanned." },
+  { name: "Point", body: "Aim at a menu, a can, a medicine box or a sign.", from: 0, to: 2300 },
+  { name: "Hear", body: "It says what matters first, out loud.", from: 2300, to: 5300 },
+  { name: "Ask", body: "Hold the mic and ask about what you scanned.", from: 5300, to: 9600 },
 ];
 
 export function HowItWorks() {
+  const [stageRef, stage] = useStage(9600, 9300);
+  const { t } = stage;
+  const step = t < 2300 ? 0 : t < 5300 ? 1 : 2;
+  const summary = wordsAt(t, 2700, 165, wordCount(HOW_SUMMARY));
+  const asked = wordsAt(t, 5700, 190, wordCount(HOW_QUESTION));
+  const answered = wordsAt(t, 7600, 180, wordCount(HOW_ANSWER));
+  const answering = t >= 7300;
+  const sheetUp = (t >= 2300 && t < 5300) || answering;
+  const lit = (i: number) => stage.reduced || i === step;
+  const progress = (i: number) =>
+    i === step && !stage.reduced
+      ? Math.max(0, Math.min(1, (t - STEPS[i].from) / (STEPS[i].to - STEPS[i].from)))
+      : 0;
+
   return (
     <section id="how" aria-labelledby="how-h" className="feature scroll-mt-16">
       <div className="feature-grid">
@@ -142,11 +160,9 @@ export function HowItWorks() {
             Point, hear, ask.
           </h2>
           <p className="lede">Claude reads what the camera sees and picks the mode for you.</p>
-        </Reveal>
-        <Reveal delay={80}>
           <ol className="steps">
             {STEPS.map((s, i) => (
-              <li key={s.name} className="step" data-on="">
+              <li key={s.name} className="step" data-on={on(lit(i))}>
                 <span className="step-n" aria-hidden>
                   {i + 1}
                 </span>
@@ -154,10 +170,70 @@ export function HowItWorks() {
                   <h3>{s.name}</h3>
                   <span>{s.body}</span>
                 </span>
+                <span className="step-bar" aria-hidden>
+                  <i style={{ transform: `scaleX(${progress(i)})` }} />
+                </span>
               </li>
             ))}
           </ol>
         </Reveal>
+
+        <StageBox
+          stageRef={stageRef}
+          stage={stage}
+          label="how it works"
+          description={`A phone points at the Retro Family Restaurant menu. Yellow brackets lock on, and SightLine says: ${HOW_SUMMARY} Then you hold the mic and ask, “${HOW_QUESTION}” It answers: ${HOW_ANSWER}`}
+          className="stage-tall"
+        >
+          <div className="stage-chips md:hidden">
+            {STEPS.map((s, i) => (
+              <span key={s.name} data-on={on(lit(i))}>
+                {s.name}
+              </span>
+            ))}
+          </div>
+          <Phone width="clamp(214px, 19vw, 248px)" screen="#5d574e">
+            <Scene src={MENU.src} alt="" ratio={MENU.ratio} width="96cqw" top="15cqw" sizes="260px">
+              <Brackets
+                show={t >= 200 && t < 2300}
+                box={t < 700 ? { l: -1.5, t: -1.5, w: 103, h: 103 } : { l: 1.5, t: 1.5, w: 97, h: 97 }}
+              />
+              <span className="dc-mark" data-on={on(t >= 7100)} style={boxStyle(MENU.firstRow)} />
+            </Scene>
+            {t < 5300 && <ModeChip>AUTO</ModeChip>}
+            <div className="dc-pill" data-on={on(t >= 1000 && t < 2250)}>
+              <Scan strokeWidth={2.4} />
+              <span className="dc-pill-t">
+                <b>Retro Family menu</b>
+                <span>Tap to read</span>
+              </span>
+              <span className="dc-ripple" data-on={on(t >= 1800)} />
+            </div>
+            <div className="dc-ask" data-on={on(t >= 5450)}>
+              <small>You asked</small>
+              <p>
+                <Words text={HOW_QUESTION} shown={asked} />
+              </p>
+            </div>
+            <span className="dc-mic-ring" data-on={on(t >= 5400 && t < 7000)} />
+            <span className="dc-mic" data-on={on(t >= 5300 && t < 7300)}>
+              <Mic strokeWidth={2.2} />
+            </span>
+            <Sheet
+              show={sheetUp}
+              label={answering ? "Ask · Retro Family menu" : "Menu · Label"}
+              speaking={answering ? answered > 0 && t < 9300 : summary > 0 && t < 5100}
+            >
+              <p className="dc-say">
+                {answering ? (
+                  <Words text={HOW_ANSWER} shown={answered} />
+                ) : (
+                  <Words text={HOW_SUMMARY} shown={summary} />
+                )}
+              </p>
+            </Sheet>
+          </Phone>
+        </StageBox>
       </div>
     </section>
   );
