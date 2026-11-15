@@ -18,6 +18,7 @@ import {
   Voices,
 } from "./_components/Sections";
 import "./new.css";
+import "./polish.css";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -57,7 +58,7 @@ function Wordmark() {
   return (
     <span className="inline-flex items-center gap-2.5">
       <span className="grid size-8 place-items-center rounded-[10px] bg-[#0a0a0a]" aria-hidden>
-        <Scan className="size-[18px] text-[#ffd60a]" strokeWidth={2.6} />
+        <Scan className="size-[18px] text-white" strokeWidth={2.6} />
       </span>
       <span className="text-[19px] font-semibold tracking-[-0.03em]">SightLine</span>
     </span>

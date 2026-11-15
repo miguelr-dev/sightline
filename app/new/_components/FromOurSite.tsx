@@ -1,19 +1,16 @@
 // Sections carried over from the first SightLine site (app/components/site) into this landing page:
 // the WHO stat, the voiced demo film, who it's for, the privacy promise and the FAQ. They use this
 // page's type and spacing (.sl-new: eyebrow, h2, lede) so they read as one site. The film keeps its
-// own dark styling, scoped under .sl in site.css.
+// own styles (site.css, scoped under .sl), switched to a light theme by film-light.css.
 
-import { Inter_Tight } from "next/font/google";
 import { Check, Plus } from "lucide-react";
 
 import { DemoFilm } from "@/app/components/site/DemoFilm";
 import { FAQS, IMG } from "@/app/components/site/content";
 import "@/app/components/site/site.css";
+import "./film-light.css";
 
 import { Reveal } from "./motion";
-
-// The film's display face (the first site's), only inside the film.
-const display = Inter_Tight({ weight: ["500", "600", "700", "800"], subsets: ["latin"], variable: "--font-display", display: "swap" });
 
 const WHO = "https://www.who.int/news-room/fact-sheets/detail/blindness-and-visual-impairment";
 
@@ -44,11 +41,11 @@ export function Stat() {
   );
 }
 
-/** The voiced product film (Matilda reads each chapter), in a dark panel like the VoiceOver one. */
+/** The voiced product film (Matilda reads each chapter), in a light panel like the page's other stages. */
 export function Film() {
   return (
     <div className="scroll-mt-16 px-4 sm:px-6" id="film">
-      <div className={`sl ${display.variable} mx-auto max-w-[1200px] overflow-hidden rounded-[36px] [&_#demo]:!pb-14`}>
+      <div className="sl film-light mx-auto max-w-[1200px] overflow-hidden rounded-[36px] [&_#demo]:!pb-14">
         <DemoFilm />
       </div>
     </div>
