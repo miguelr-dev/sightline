@@ -1,12 +1,11 @@
-// When the "From the web" summary is spoken (tested in modeStrip.test.ts). On the phone camera,
-// lookups run on their own and the card appears, but it stays silent unless the user asked for a
-// lookup or taps Listen. The hat camera is hands-free (no screen to tap), so its web summary is
-// spoken automatically right after the answer, through the same queue (closing the result stops it).
+// When the "From the web" summary is spoken (tested in modeStrip.test.ts). Lookups run on their
+// own (phone camera, barcodes and the hat) and the card appears, but it stays silent unless the
+// user asked for a lookup or taps Listen.
 
 export type WebTrigger = "automatic" | "hatUpdate" | "autoLookup" | "lookupButton" | "hatLookupCommand";
 
 export function webSpeechPolicy(trigger: WebTrigger): "speak" | "silent" {
-  return trigger === "automatic" ? "silent" : "speak";
+  return trigger === "automatic" || trigger === "hatUpdate" ? "silent" : "speak";
 }
 
 /** The web card's Listen/Stop button. */

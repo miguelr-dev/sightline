@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialBarcodeState, normalizeBarcode, reduceBarcode, pickCard, frameCheckAllowed } from "./barcode";
+import { initialBarcodeState, normalizeBarcode, reduceBarcode, pickCard, frameCheckAllowed, barcodeWebQuery } from "./barcode";
 import { initialReadAll, reduceReadAll } from "./readAll";
 
 describe("normalizeBarcode", () => {
@@ -181,5 +181,18 @@ describe("BARCODE mode rescan after closing the sheet", () => {
     s = reduceBarcode(s, { type: "sheetClosed", at: 5000, holdMs: 3000 }).state;
     s = reduceBarcode(s, { type: "seen", code: OTHER, at: 5200 }).state;
     expect(reduceBarcode(s, { type: "seen", code: OTHER, at: 5400 }).effects).toContainEqual({ type: "confirmed", code: OTHER });
+  });
+});
+
+describe("barcodeWebQuery: barcode results look themselves up on the web automatically", () => {
+  it("uses the product name, adding the brand when the name doesn't already include it", () => {
+    expect(barcodeWebQuery({ found: true, title: "Energy Drink - Tropical", brand: "Kirkland" })).toBe("Kirkland Energy Drink - Tropical");
+    expect(barcodeWebQuery({ found: true, title: "Nutter Butter Bites", brand: "Nutter Butter" })).toBe("Nutter Butter Bites");
+    expect(barcodeWebQuery({ found: true, title: "Almdudler Original 0,35l" })).toBe("Almdudler Original 0,35l");
+  });
+  it("skips the lookup when the barcode wasn't found or has no name", () => {
+    expect(barcodeWebQuery({ found: false, title: "Something" })).toBe("");
+    expect(barcodeWebQuery({ found: true })).toBe("");
+    expect(barcodeWebQuery({ found: true, title: "   " })).toBe("");
   });
 });
