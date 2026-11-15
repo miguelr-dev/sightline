@@ -101,7 +101,7 @@ export const SAMPLES = [
 export const CHAPTERS = [
   { s: 0, e: 25, title: "It spots the menu" },
   { s: 25, e: 40, title: "Just ask" },
-  { s: 40, e: 56, title: "Read any sign" },
+  { s: 40, e: 56, title: "Translate a sign" },
   { s: 56, e: 76, title: "Know what you’re holding" },
   { s: 76, e: 88, title: "Hear the world" },
 ];
@@ -129,11 +129,8 @@ export const A11Y_FEATURES = [
 
 export const FAQS = [
   { q: "Is it free?", a: "Yes. SightLine is free during early access." },
-  { q: "Do I need to download anything?", a: "No. Open the link in your phone's browser. You can add it to your home screen so it opens like an app." },
   { q: "Which phones work?", a: "Any recent iPhone or Android phone with a modern browser, such as Safari or Chrome. An iPhone app is in testing." },
   { q: "Which languages can it translate?", a: "English, Spanish, French, German, Italian, Portuguese, Chinese, Japanese, Korean, Arabic, Hindi, Vietnamese, and Tagalog." },
-  { q: "Is my photo saved?", a: "No. Photos are never stored. SightLine keeps the text of recent answers for this device so you can ask about them later, and you can clear that history in Settings." },
-  { q: "Does it work with VoiceOver and TalkBack?", a: "Yes. Every control is labelled, answers are announced by your screen reader, and text follows your phone's text size. Turn Auto-speak off so SightLine doesn't talk over it." },
   { q: "Does it work offline?", a: "Not yet. SightLine needs a connection to describe a photo. Offline reading is on our roadmap." },
   { q: "How accurate is it?", a: "Very good on clear, well-lit photos. When it isn't sure, it says so and tells you how to retake the photo. For medicine, always double-check with a pharmacist." },
 ];
