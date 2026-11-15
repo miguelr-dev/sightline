@@ -28,6 +28,7 @@ import { recordOnce, recorderSupported } from "@/lib/recorder";
 import { dismissCard, initialAutoState, lastSeen, reduceFrame, resumeAfterSheet, type Detection } from "@/lib/detect";
 import { Magnifier } from "./Magnifier";
 import { RecentSheet, SettingsSheet } from "./AppSheets";
+import { StartScreen } from "./StartScreen";
 
 const INTRO =
   "Welcome to SightLine. Point your camera at something and tap Capture at the bottom of the screen, and I'll tell you what's there.";
@@ -1191,42 +1192,18 @@ export default function SightLine() {
     if (latest.current.result) replay();
   };
 
+  /** Start, with the voice choice from the start screen (the same switch as Settings > Auto-speak). */
   const begin = () => {
     unlockAll();
+    writePref("sl.autoSpeak", autoSpeak);
     setStarted(true);
-    speak(INTRO);
+    if (autoSpeak) speak(INTRO);
     void startCamera();
   };
 
-  // ---------- Onboarding ----------
+  // ---------- Onboarding: one choice, voice or no voice ----------
   if (!started) {
-    return (
-      <main className="min-h-dvh bg-white text-black">
-        <div className="mx-auto flex min-h-dvh max-w-xl flex-col justify-center gap-8 px-6 py-10">
-          <div className="flex flex-col gap-4">
-            <svg width={56} height={56} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-              <rect x="1" y="1" width="30" height="30" rx="8" fill="#000" />
-              <ellipse cx="16" cy="16" rx="11" ry="6.8" fill="none" stroke="#fff" strokeWidth="2.6" />
-              <circle cx="16" cy="16" r="3.6" fill="#fff" />
-            </svg>
-            <h1 className="text-[34px] font-bold leading-tight tracking-tight">SightLine</h1>
-            <p className="text-[22px] font-semibold leading-snug">Point your camera. Hear the world.</p>
-            <p className="text-[17px] leading-relaxed">
-              SightLine reads text, describes what&apos;s around you, explains menus and labels, and translates signs, out loud.
-            </p>
-            <p className="text-[15px] leading-relaxed text-[#55555A]">
-              When you tap Start, your browser will ask to use the camera. Each photo is sent to an AI model to be described, and
-              product or restaurant names may be searched on the web. SightLine never saves your photos. It keeps the text of
-              recent answers so you can look back at them.
-            </p>
-          </div>
-          <button type="button" onClick={begin} className={`${pillBlack} min-h-14 text-[19px]`}>
-            {I.camera}
-            Start SightLine
-          </button>
-        </div>
-      </main>
-    );
+    return <StartScreen voice={autoSpeak} onVoice={setAutoSpeak} onStart={begin} />;
   }
 
   // ---------- Main screen: camera first, like the iPhone app ----------
