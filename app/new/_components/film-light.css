@@ -1,0 +1,109 @@
+/* The demo film (site.css, dark by default) on the light landing page: a grey panel like the page's
+   other stages, set in the page's font, with black controls. The phone inside keeps its dark camera
+   screen, because that's the real app. Loaded after site.css; ".sl.film-light .x" outranks site.css's
+   ".sl .x". */
+
+.sl.film-light {
+  --accent: #0a0a0a;
+  --ink: #0a0a0a;
+  --muted: #55555a;
+  --line: #e5e5ea;
+  --font-display: var(--font-inter), -apple-system, system-ui, sans-serif;
+  background: #f2f2f7;
+  color: #0a0a0a;
+  font-family: var(--font-inter), -apple-system, system-ui, sans-serif;
+}
+.sl.film-light a {
+  color: #0a0a0a;
+}
+
+/* Heading in the page's style: a quiet eyebrow and the page's h2 size. */
+.sl.film-light .sec {
+  padding: 72px 0 0;
+}
+.sl.film-light .eyebrow {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-transform: none;
+  color: #55555a;
+}
+.sl.film-light .sec-h {
+  font-size: clamp(36px, 4.4vw, 56px);
+  line-height: 1;
+  letter-spacing: -0.045em;
+}
+
+/* The stage: a white card on the grey panel. */
+.sl.film-light .film {
+  background: #ffffff;
+  border-color: #e5e5ea;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.sl.film-light .asked b {
+  color: #0a0a0a;
+}
+.sl.film-light .langchip {
+  border-color: #d1d1d6;
+}
+.sl.film-light .lines li {
+  color: #aeaeb2;
+}
+.sl.film-light .lines li.done {
+  color: #0a0a0a;
+}
+.sl.film-light .lines li.now {
+  color: #ffffff;
+  background: #0a0a0a;
+}
+
+/* Controls: white buttons with a hairline, the active one solid black. */
+.sl.film-light .ibtn {
+  background: #ffffff;
+  color: #0a0a0a;
+  border-color: #d1d1d6;
+}
+.sl.film-light .ibtn:hover {
+  border-color: #0a0a0a;
+}
+.sl.film-light .ibtn.p {
+  background: #0a0a0a;
+  color: #ffffff;
+  border-color: #0a0a0a;
+}
+.sl.film-light .seg {
+  color: #55555a;
+}
+.sl.film-light .seg.on {
+  color: #0a0a0a;
+}
+.sl.film-light .seg .bar {
+  background: #e5e5ea;
+}
+.sl.film-light .seg .fill,
+.sl.film-light .seg.on .fill {
+  background: #0a0a0a;
+}
+.sl.film-light .transcript ol {
+  color: #3a3a3c;
+}
+.sl.film-light .soundhint {
+  background: #0a0a0a;
+  color: #ffffff;
+}
+.sl.film-light .soundhint:hover {
+  background: #2c2c2e;
+}
+
+/* The closing frame: black with white type, the page's one call to action. */
+.sl.film-light .endcard {
+  background: #0a0a0a;
+  color: #ffffff;
+}
+.sl.film-light .endcard .disp {
+  color: #ffffff;
+}
+.sl.film-light .endcard .btn {
+  background: #ffffff !important;
+  color: #0a0a0a !important;
+}

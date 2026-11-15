@@ -1,0 +1,20 @@
+/* One calm palette for the landing page: white and light grey surfaces, near-black type, one dark
+   panel (accessibility). The app's yellow appears only inside the product itself (camera brackets,
+   mode chips, allergen chips), where it is the real UI, not as page decoration. Unlayered, so these
+   win over new.css's @layer components rules. */
+
+/* "Know." in the headline and the closing call to action: plain type, no highlighter. */
+.sl-new .mark {
+  background: none;
+}
+
+/* How it works: the active step number in black, like the page's other controls. */
+.sl-new .step[data-on] .step-n {
+  background: #0a0a0a;
+  color: #ffffff;
+}
+
+/* Try a sample: the "live" dot in the system green rather than the brand yellow. */
+.sl-new .try-tag-live::before {
+  background: #34c759;
+}
