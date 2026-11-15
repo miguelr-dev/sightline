@@ -29,6 +29,9 @@ import { dismissCard, initialAutoState, lastSeen, reduceFrame, resumeAfterSheet,
 import { Magnifier } from "./Magnifier";
 import { RecentSheet, SettingsSheet } from "./AppSheets";
 import { StartScreen } from "./StartScreen";
+import { MenuView } from "./MenuView";
+import { parseMenu } from "@/lib/menuView";
+import { answerLang } from "@/lib/speechLang";
 
 const INTRO =
   "Welcome to SightLine. Point your camera at something and tap Capture at the bottom of the screen, and I'll tell you what's there.";
@@ -539,9 +542,11 @@ export default function SightLine() {
         clearTimeout(timer);
       }
 
-      const speakLang = data.error ? "en-US" : langCode;
-      // In Auto the server reports the mode it chose.
-      const fresh: Result = { ...data, mode: data.mode ?? (opts.mode === "auto" ? "describe" : opts.mode), langCode: speakLang, question: opts.question };
+      // In Auto the server reports the mode it chose. The voice speaks the answer's own language
+      // (Translate: the chosen one; a Spanish sign read verbatim: Spanish), as in the iPhone app.
+      const answerMode: Mode = data.mode ?? (opts.mode === "auto" ? "describe" : opts.mode);
+      const speakLang = data.error ? "en-US" : opts.mode === "translate" ? langCode : answerLang(answerMode, opts.language, data.spokenLanguage);
+      const fresh: Result = { ...data, mode: answerMode, langCode: speakLang, question: opts.question };
       setResult(fresh);
       setStatus("");
       if (data.error) {
@@ -1209,6 +1214,7 @@ export default function SightLine() {
   // ---------- Main screen: camera first, like the iPhone app ----------
   const cameraStatus = camera === "on" ? "Camera on" : camera === "starting" ? "Starting camera…" : "Camera off";
   const showSheet = sheetOpen && sheet === "none";
+  const menu = result && !result.error ? parseMenu(result.menu) : undefined;
   const photoSrc = lastImage ? `data:image/jpeg;base64,${lastImage}` : (result?.photoUrl ?? null);
   const frost = "bg-black/45 text-white backdrop-blur-md";
   const listeningText = recording ? "Listening… tap the mic when done" : "Listening…";
@@ -1574,7 +1580,7 @@ export default function SightLine() {
                 className={`relative block w-full shrink-0 rounded-2xl ${focus}`}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element -- in-memory data URL */}
-                <img src={photoSrc} alt="" className="max-h-56 w-full rounded-2xl object-cover" />
+                <img src={photoSrc} alt="" className={`${menu ? "max-h-32" : "max-h-56"} w-full rounded-2xl object-cover`} />
                 <span aria-hidden="true" className="absolute bottom-3 right-3 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white">
                   {I.magnify}
                 </span>
@@ -1593,10 +1599,13 @@ export default function SightLine() {
                   {status || "Thinking…"}
                 </p>
               ) : (
-                <p className={`text-[20px] leading-snug ${result.error ? "border-l-4 border-[#D70015] pl-3 font-semibold" : ""}`} lang={result.langCode}>
-                  {result.error && <span className="text-[#D70015]">Error: </span>}
-                  {result.spokenText}
-                </p>
+                <>
+                  {menu?.name && <h3 className="text-[28px] font-bold leading-tight tracking-tight">{menu.name}</h3>}
+                  <p className={`text-[20px] leading-snug ${result.error ? "border-l-4 border-[#D70015] pl-3 font-semibold" : ""}`} lang={result.langCode}>
+                    {result.error && <span className="text-[#D70015]">Error: </span>}
+                    {result.spokenText}
+                  </p>
+                </>
               )}
             </div>
 
@@ -1639,7 +1648,26 @@ export default function SightLine() {
               </div>
             </div>
 
-            {result.details && !busy && <Sections sections={result.sections} fallback={result.details} />}
+            {menu && !busy && (
+              <MenuView
+                menu={menu}
+                lang={result.langCode}
+                speak={speak}
+                stop={stopSpeech}
+                speaking={speech.speaking}
+                onAskDish={(name) => {
+                  setQuestion(`Is the ${name} `);
+                  setTimeout(() => document.getElementById("question")?.focus(), 30);
+                }}
+              />
+            )}
+            {/* With a menu, only the sections that aren't its dishes (hours, a dietary key); otherwise all. */}
+            {result.details && !busy && (
+              <Sections
+                sections={menu ? result.sections?.filter((x) => !menu.sections.some((m) => m.title === x.title)) : result.sections}
+                fallback={menu ? undefined : result.details}
+              />
+            )}
 
             {features?.lookup && !result.error && !result.barcodeCode && (
               <button
