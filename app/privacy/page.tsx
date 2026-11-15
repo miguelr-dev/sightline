@@ -40,7 +40,7 @@ export default function PrivacyPage() {
         <p>SightLine uses no advertising or tracking cookies.</p>
         <h2>Contact</h2>
         <p>
-          Questions about privacy: <a href="mailto:hello@sightline.example">hello@sightline.example</a>
+          Questions about privacy: <a href="https://github.com/miguelr-dev/sightline/issues">open an issue on GitHub</a>.
         </p>
       </article>
     </SiteShell>
