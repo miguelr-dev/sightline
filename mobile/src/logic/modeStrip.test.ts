@@ -43,9 +43,11 @@ describe("mode strip model", () => {
 });
 
 describe("web card speech policy", () => {
-  it("is silent by default when the lookup ran on its own", () => {
+  it("is silent by default when the phone camera's lookup ran on its own", () => {
     expect(webSpeechPolicy("automatic")).toBe("silent");
-    expect(webSpeechPolicy("hatUpdate")).toBe("silent");
+  });
+  it("speaks the hat camera's web lookup automatically, right after the answer (hands-free)", () => {
+    expect(webSpeechPolicy("hatUpdate")).toBe("speak");
   });
   it("speaks when the user explicitly asked for a lookup", () => {
     expect(webSpeechPolicy("autoLookup")).toBe("speak"); // "search for this"
