@@ -26,6 +26,17 @@ const voice = (id: VoiceId) => VOICE.find((v) => v.id === id)!;
 const progress = (id: VoiceId, lt: number) => Math.max(0, Math.min(1, (lt - voice(id).at) / voice(id).dur));
 const voicing = (id: VoiceId, lt: number) => lt >= voice(id).at && lt < voice(id).at + voice(id).dur;
 
+function chapterOf(t: number) {
+  const i = CHAPTERS.findIndex((c) => t >= c.s && t < c.e);
+  return i < 0 ? CHAPTERS.length - 1 : i;
+}
+/** The clip that belongs at film time `t`, and how far into it we are. */
+function lineAt(t: number): { id: VoiceId; offset: number } | null {
+  const ci = chapterOf(t);
+  const v = VOICE.find((x) => x.ch === ci && voicing(x.id, t - CHAPTERS[ci].s));
+  return v ? { id: v.id, offset: t - CHAPTERS[ci].s - v.at } : null;
+}
+
 function words(str: string, n: number) {
   const w = str.split(" ");
   return w.slice(0, Math.max(0, Math.min(w.length, n))).join(" ");
@@ -158,10 +169,13 @@ export function DemoFilm() {
   const [t, setT] = useState(0);
   const [playing, setPlaying] = useState(true);
   const [visible, setVisible] = useState(false);
-  const [sound, setSound] = useState(false); // off until tapped: browsers block sound that starts by itself
+  const [sound, setSound] = useState(true); // on by default (the speaker icon turns it off)
+  const [blocked, setBlocked] = useState(false); // the browser won't start sound until the visitor taps
   const ref = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const clipRef = useRef<VoiceId | null>(null);
+  const blockedRef = useRef(false);
+  const tRef = useRef(0);
 
   // Only run the clock while the film is on screen.
   useEffect(() => {
@@ -186,31 +200,79 @@ export function DemoFilm() {
     return () => clearInterval(id);
   }, [running]);
 
-  // Sound: play the line that belongs at time t, and keep it in step if the clock drifts or jumps.
+  // Sound. One audio element plays every clip. Browsers only allow sound after the visitor has
+  // tapped or clicked something on the page, so until then the first play is refused ("blocked"):
+  // the film keeps going, a "Tap for sound" button shows, and the first tap anywhere starts the voice.
+  useEffect(() => {
+    audioRef.current ??= Object.assign(new Audio(), { preload: "auto" });
+    return () => audioRef.current?.pause();
+  }, []);
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
+
+  const start = useCallback((a: HTMLAudioElement) => {
+    a.play().catch((e: unknown) => {
+      if (e instanceof DOMException && e.name === "NotAllowedError") {
+        blockedRef.current = true;
+        clipRef.current = null;
+        setBlocked(true);
+      }
+    });
+  }, []);
+
+  // Play the line that belongs at time t, and keep it in step if the clock drifts or jumps.
   useEffect(() => {
     const a = audioRef.current;
-    if (!a) return;
-    const ci = chapterAt(t);
-    const active = sound && running ? VOICE.find((v) => v.ch === ci && voicing(v.id, t - CHAPTERS[ci].s)) : undefined;
-    if (!active) {
+    if (!a || blockedRef.current) return;
+    const line = sound && running ? lineAt(t) : null;
+    if (!line) {
       if (!a.paused) a.pause();
       clipRef.current = null;
       return;
     }
-    const want = t - CHAPTERS[ci].s - active.at;
-    if (clipRef.current !== active.id) {
-      clipRef.current = active.id;
-      a.src = `/site/voice/${active.id}.mp3`;
-      a.currentTime = want;
-      void a.play().catch(() => {});
+    if (clipRef.current !== line.id) {
+      clipRef.current = line.id;
+      a.src = `/site/voice/${line.id}.mp3`;
+      a.currentTime = line.offset;
+      start(a);
     } else if (a.paused && !a.ended) {
-      a.currentTime = want;
-      void a.play().catch(() => {});
-    } else if (!a.paused && Math.abs(a.currentTime - want) > 1) {
-      a.currentTime = want;
+      a.currentTime = line.offset;
+      start(a);
+    } else if (!a.paused && Math.abs(a.currentTime - line.offset) > 1) {
+      a.currentTime = line.offset;
     }
-  }, [t, sound, running]);
-  useEffect(() => () => audioRef.current?.pause(), []);
+  }, [t, sound, running, start]);
+
+  // Blocked: the first tap, click or key press anywhere on the page starts the voice (inside that
+  // gesture, which is what the browser requires), at the right point in the current line.
+  useEffect(() => {
+    if (!blocked) return;
+    const unlock = () => {
+      const a = audioRef.current;
+      if (!a) return;
+      const line = lineAt(tRef.current);
+      a.src = `/site/voice/${line?.id ?? "end"}.mp3`;
+      if (line) a.currentTime = line.offset;
+      a.muted = !line; // nothing to say right now: unlock silently
+      a.play()
+        .then(() => {
+          if (!line) a.pause();
+          a.muted = false;
+          clipRef.current = line?.id ?? null;
+          blockedRef.current = false;
+          setBlocked(false);
+        })
+        .catch(() => {
+          a.muted = false;
+        });
+    };
+    const events = ["pointerdown", "keydown", "touchend"] as const;
+    for (const e of events) document.addEventListener(e, unlock, true);
+    return () => {
+      for (const e of events) document.removeEventListener(e, unlock, true);
+    };
+  }, [blocked]);
 
   // Reduced motion: show the finished frame of each chapter and step with Previous / Next.
   const shownT = reduced && t < CHAPTERS[0].e - 0.6 ? CHAPTERS[0].e - 0.6 : t;
@@ -223,27 +285,13 @@ export function DemoFilm() {
     [reduced],
   );
 
-  /** The speaker icon. Turning sound on replays the current chapter so Matilda starts at its line. */
+  /** The speaker icon. Turning sound back on replays the current chapter so Matilda starts at its line. */
   const toggleSound = () => {
     if (sound) {
       setSound(false);
       audioRef.current?.pause();
       return;
     }
-    // Made and started inside the tap, so iOS Safari lets it play later.
-    const a = (audioRef.current ??= new Audio());
-    a.preload = "auto";
-    a.muted = true;
-    a.src = `/site/voice/${(VOICE.find((v) => v.ch === f.ci) ?? VOICE[0]).id}.mp3`;
-    void a
-      .play()
-      .then(() => {
-        if (clipRef.current === null) a.pause();
-        a.muted = false;
-      })
-      .catch(() => {
-        a.muted = false;
-      });
     clipRef.current = null;
     setSound(true);
     setPlaying(true);
@@ -261,6 +309,13 @@ export function DemoFilm() {
         </h2>
 
         <div className="film" ref={ref}>
+          {sound && blocked && running && (
+            // The tap itself unlocks the sound (see above); this also replays the chapter from its start.
+            <button type="button" className="soundhint" onClick={() => setT(CHAPTERS[f.ci].s)}>
+              <Speaker />
+              Tap for sound
+            </button>
+          )}
           <div aria-hidden="true" style={{ display: "flex", justifyContent: "center" }}>
             <PhoneMock s={f.phone} />
           </div>
