@@ -5,12 +5,11 @@ repo root is its backend: every request goes to its `/api/*` routes, so no API k
 
 ## Run it
 
-1. Start the backend at the repo root, listening on the network:
+1. The backend is the live site, https://sightline-theta-drab.vercel.app, by default: nothing to run.
+2. To use a local backend instead, start it at the repo root, listening on the network, and set its URL
+   in `mobile/.env` (gitignored; copy `.env.example`):
    ```bash
    npm run dev -- -H 0.0.0.0
-   ```
-2. Set the backend URL in `mobile/.env` (gitignored; copy `.env.example`):
-   ```bash
    EXPO_PUBLIC_API_URL=http://100.64.19.59:3000   # your Mac's LAN IP: ipconfig getifaddr en0
    ```
 3. Start Metro and scan the QR code with the iPhone Camera app (opens Expo Go):
@@ -22,7 +21,8 @@ repo root is its backend: every request goes to its `/api/*` routes, so no API k
 ## Changing the server without restarting
 
 Settings (gear icon) > Server lets you type any URL, saved on the phone. "Check connection" calls
-`/api/features` and shows what the server supports. "Use default" goes back to `EXPO_PUBLIC_API_URL`.
+`/api/features` and shows what the server supports. "Use default" goes back to `EXPO_PUBLIC_API_URL`,
+or the live site when that isn't set.
 Changing `.env` needs a Metro restart (`npx expo start --lan --clear`).
 
 ## Hackathon Wi-Fi

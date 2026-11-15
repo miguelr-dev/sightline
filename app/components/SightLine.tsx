@@ -9,18 +9,26 @@ import {
   findLanguage,
   type AnalyzeResponse,
   type AskResponse,
+  type BarcodeResponse,
   type Features,
+  type FrameCheckResponse,
+  type HistoryScan,
   type LookupResponse,
   type Mode,
   type RequestMode,
   type Section,
+  type Voice,
 } from "@/lib/modes";
-import { captureVideoFrame, fileToBase64 } from "@/lib/image";
+import { captureVideoFrame, drawVideoCrop, fileToBase64 } from "@/lib/image";
+import { getDetector, holdCode, initialScanState, normalizeBarcode, onAnswerClosed, onSighting } from "@/lib/barcodeScan";
 import { beepDone, beepError, beepStart, unlockAudio, vibrate } from "@/lib/feedback";
 import { useSpeech, type SpeakOptions } from "@/lib/useSpeech";
 import { listenOnce, parseCommand, recognitionSupported, type Listener } from "@/lib/voice";
 import { recordOnce, recorderSupported } from "@/lib/recorder";
+import { dismissCard, initialAutoState, lastSeen, reduceFrame, resumeAfterSheet, type Detection } from "@/lib/detect";
 import { Magnifier } from "./Magnifier";
+import { RecentSheet, SettingsSheet } from "./AppSheets";
+import { StartScreen } from "./StartScreen";
 
 const INTRO =
   "Welcome to SightLine. Point your camera at something and tap Capture at the bottom of the screen, and I'll tell you what's there.";
@@ -31,6 +39,16 @@ const MIN_GAP_MS = 1500; // ignore accidental double captures
 const REQUEST_TIMEOUT_MS = 45_000;
 const LOOKUP_TIMEOUT_MS = 20_000; // the server stops itself at about 15 seconds
 const ASK_TIMEOUT_MS = 25_000;
+const BARCODE_TIMEOUT_MS = 20_000;
+const SCAN_EVERY_MS = 250; // pause between barcode scans of the viewfinder
+// Detect, as in the iPhone app (mobile/src/useAutoCapture.ts): small silent frames go to
+// /api/frame-check back to back, and anything readable is offered as a card. Never read by itself.
+const DETECT_SETTLE_MS = 800; // after the camera starts or a sheet closes
+const DETECT_GAP_MS = 700; // pause after one check before the next (each takes about 1 to 2 s)
+const DETECT_ERROR_BACKOFF_MS = 3000;
+const DETECT_HIDE_MS = 2000; // the card fades this long after its item leaves the frame
+const HINT_SHOW_MS = 4000;
+const BARCODE_GONE_MS = 1500; // the barcode card hides once its code has been out of view this long
 // Camera zoom, as in the iPhone app (mobile/src/logic/zoom.ts): 1×, 2× and 5× chips, or pinch.
 const ZOOM_CHIPS = [1, 2, 5] as const;
 const MAX_ZOOM = 5;
@@ -44,7 +62,9 @@ function zoomChips(z: number) {
 }
 
 type CameraState = "off" | "starting" | "on" | "unavailable";
-type Result = AnalyzeResponse & { mode: Mode; langCode: string; question?: string };
+// barcodeCode: set for barcode answers. photoUrl: a reopened scan's web image (no photo of our own).
+type Result = AnalyzeResponse & { mode: Mode; langCode: string; question?: string; barcodeCode?: string; photoUrl?: string };
+type BarcodeCard = { code: string; data: BarcodeResponse; image: string | null };
 type WebState =
   | { status: "loading"; query: string }
   | { status: "done"; data: LookupResponse };
@@ -115,6 +135,16 @@ const I = {
   speaker: <Svg size={16}><path d="M4 9h3.5L13 4.5v15L7.5 15H4z" /><path d="M16.5 9a4 4 0 0 1 0 6" /></Svg>,
   speakerOff: <Svg size={16}><path d="M4 9h3.5L13 4.5v15L7.5 15H4z" /><path d="M16.5 9.5l5 5M21.5 9.5l-5 5" /></Svg>,
   send: <Svg size={18}><path d="M12 19V5M6 11l6-6 6 6" /></Svg>,
+  barcode: <Svg size={24}><path d="M3 7V4.5A1.5 1.5 0 0 1 4.5 3H7M17 3h2.5A1.5 1.5 0 0 1 21 4.5V7M21 17v2.5a1.5 1.5 0 0 1-1.5 1.5H17M7 21H4.5A1.5 1.5 0 0 1 3 19.5V17M7 8v8M10 8v8M13 8v8M16.5 8v8" /></Svg>,
+  viewfinder: <Svg size={20}><path d="M3 8V5.5A2.5 2.5 0 0 1 5.5 3H8M16 3h2.5A2.5 2.5 0 0 1 21 5.5V8M21 16v2.5a2.5 2.5 0 0 1-2.5 2.5H16M8 21H5.5A2.5 2.5 0 0 1 3 18.5V16" /></Svg>,
+  clock: <Svg size={24}><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5" /><path d="M3.5 3.5v5h5M12 7.5V12l3 2" /></Svg>,
+  gear: (
+    <Svg size={24}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+    </Svg>
+  ),
+  library: <Svg size={28}><rect x="6.5" y="3" width="14.5" height="14.5" rx="2" /><path d="M3 7v12.5A1.5 1.5 0 0 0 4.5 21H17M21 13.5l-4.5-4.5-7 7" /></Svg>,
   magnify: <Svg size={20}><circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.5 15.5L21 21M10.5 7.5v6M7.5 10.5h6" /></Svg>,
 };
 
@@ -141,6 +171,22 @@ function Sections({ sections, fallback }: { sections?: Section[]; fallback?: str
 const modeLabel = (m: RequestMode) => (m === "auto" ? "Auto" : MODE_LABELS[m]);
 const modeHint = (m: RequestMode) => (m === "auto" ? "SightLine picks the best mode for each photo." : MODE_HINTS[m]);
 
+/** Yellow brackets around what Detect found; `box` is 0 to 1 of the viewfinder. */
+function DetectBrackets({ box }: { box: { x: number; y: number; w: number; h: number } }) {
+  const c = "absolute h-6 w-6 border-[#FFD60A] drop-shadow-[0_0_2px_rgba(0,0,0,0.6)]";
+  return (
+    <div
+      className="pointer-events-none absolute transition-all duration-200 motion-reduce:transition-none"
+      style={{ left: `${box.x * 100}%`, top: `${box.y * 100}%`, width: `${box.w * 100}%`, height: `${box.h * 100}%` }}
+    >
+      <span className={`${c} left-0 top-0 rounded-tl-lg border-l-[3px] border-t-[3px]`} />
+      <span className={`${c} right-0 top-0 rounded-tr-lg border-r-[3px] border-t-[3px]`} />
+      <span className={`${c} bottom-0 left-0 rounded-bl-lg border-b-[3px] border-l-[3px]`} />
+      <span className={`${c} bottom-0 right-0 rounded-br-lg border-b-[3px] border-r-[3px]`} />
+    </div>
+  );
+}
+
 export default function SightLine() {
   const [started, setStarted] = useState(false);
   const [camera, setCamera] = useState<CameraState>("off");
@@ -163,6 +209,17 @@ export default function SightLine() {
   const [hwZoom, setHwZoom] = useState<HwZoom>(null);
   const [magnify, setMagnify] = useState(false);
   const [vfCenter, setVfCenter] = useState<string | undefined>(); // CSS zoom centres on the viewfinder
+  const [barcodeBox, setBarcodeBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [barcodeCard, setBarcodeCardState] = useState<BarcodeCard | null>(null);
+  const [barcodeNote, setBarcodeNote] = useState(""); // screen reader announcement for the cards
+  const [sheet, setSheet] = useState<"none" | "settings" | "recent">("none");
+  const [detectOn, setDetectOn] = useState(true); // Detect, on by default as in the iPhone app
+  const [detection, setDetection] = useState<Detection | null>(null);
+  const [detectBox, setDetectBox] = useState<{ box: { x: number; y: number; w: number; h: number }; at: number } | null>(null);
+  const [hint, setHint] = useState<string | null>(null);
+  const [natural, setNatural] = useState(true); // Natural voice (ElevenLabs); off = the browser's voice
+  const [voiceId, setVoiceId] = useState(""); // "" = the server's default voice (Matilda)
+  const [voices, setVoices] = useState<Voice[] | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const frameRef = useRef<HTMLDivElement>(null); // the viewfinder: what's inside it is what gets sent
@@ -176,9 +233,19 @@ export default function SightLine() {
   const lookupIdRef = useRef(0);
   const zoomRef = useRef(1);
   const pinchRef = useRef<{ d: number; z: number } | null>(null);
+  const scanRef = useRef(initialScanState);
+  const scanCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const scanFailedRef = useRef(false);
+  const cardRef = useRef<BarcodeCard | null>(null);
+  const lastSeenRef = useRef<{ code: string; at: number } | null>(null);
+  const fetchingRef = useRef<string | null>(null);
+  const autoRef = useRef(initialAutoState);
+  const detectionRef = useRef<Detection | null>(null);
+  const detectHideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const speech = useSpeech();
-  const { speak, stop: stopSpeech, setRate, unlock: unlockSpeech, setElevenAvailable } = speech;
+  const { speak, stop: stopSpeech, setRate, unlock: unlockSpeech, setElevenAvailable, setNatural: setSpeechNatural, setVoice: setSpeechVoice, playUrl } = speech;
 
   // Latest state for async callbacks (voice results, fetch completions).
   const latest = useRef({ mode, language, autoSpeak, result, lastImage, camera, features, web, webLang });
@@ -200,9 +267,33 @@ export default function SightLine() {
     setRateState(r);
     setRate(r);
     setLanguage(readPref("sl.language", "English"));
+    setDetectOn(readPref("sl.detect", true));
+    const n = readPref("sl.natural", true);
+    setNatural(n);
+    setSpeechNatural(n);
+    const v = readPref("sl.voice", "");
+    setVoiceId(v);
+    setSpeechVoice(v);
     setCanListen(recognitionSupported());
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [setRate]);
+  }, [setRate, setSpeechNatural, setSpeechVoice]);
+
+  // The voice picker's list (Settings > Voice), when the server has ElevenLabs.
+  useEffect(() => {
+    if (!features?.elevenlabs) return;
+    let alive = true;
+    fetch("/api/voices")
+      .then((r) => (r.ok ? (r.json() as Promise<{ voices?: Voice[] }>) : null))
+      .then((d) => {
+        if (alive && Array.isArray(d?.voices) && d.voices.length) setVoices(d.voices);
+      })
+      .catch(() => {
+        // No picker; the default voice still works.
+      });
+    return () => {
+      alive = false;
+    };
+  }, [features?.elevenlabs]);
 
   // Ask the server which optional integrations (ElevenLabs, Bright Data) are configured.
   useEffect(() => {
@@ -322,7 +413,7 @@ export default function SightLine() {
   const startCamera = useCallback(async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
       setCamera("unavailable");
-      setStatus("This browser can't use the camera. Use Upload photo instead.");
+      setStatus("This browser can't use the camera. Tap the photo button at the bottom left to choose a photo instead.");
       return;
     }
     setCamera("starting");
@@ -347,7 +438,7 @@ export default function SightLine() {
       setCamera("on");
     } catch {
       setCamera("unavailable");
-      const msg = "Camera is not available. You can upload a photo instead.";
+      const msg = "Camera is not available. You can choose a photo instead.";
       setStatus(msg);
       say(msg);
     }
@@ -402,7 +493,7 @@ export default function SightLine() {
 
   // ---------- Analyze ----------
   const analyze = useCallback(
-    async (image: string, opts: { mode: RequestMode; language: string; question?: string }) => {
+    async (image: string, opts: { mode: RequestMode; language: string; question?: string; key?: string }) => {
       const now = Date.now();
       if (busyRef.current || now - lastSendRef.current < MIN_GAP_MS) return;
       busyRef.current = true;
@@ -482,14 +573,14 @@ export default function SightLine() {
   );
 
   const capture = useCallback(
-    (override?: { mode?: RequestMode; language?: string }) => {
+    (override?: { mode?: RequestMode; language?: string; key?: string }) => {
       unlockAll();
       if (busyRef.current) return;
       const m = override?.mode ?? latest.current.mode;
       const lang = override?.language ?? latest.current.language;
       const video = videoRef.current;
       if (latest.current.camera !== "on" || !video) {
-        const msg = "The camera is off. Use the Upload photo button instead.";
+        const msg = "The camera is off. Tap the photo button at the bottom left to choose a photo instead.";
         setStatus(msg);
         say(msg);
         return;
@@ -506,7 +597,7 @@ export default function SightLine() {
       }
       setLastImage(image);
       setDismissed(latest.current.result);
-      void analyze(image, { mode: m, language: lang });
+      void analyze(image, { mode: m, language: lang, ...(override?.key ? { key: override.key } : {}) });
     },
     [analyze, say, unlockAll],
   );
@@ -748,14 +839,351 @@ export default function SightLine() {
     [ask, handleCommand, say, stopSpeech, unlockAll],
   );
 
-  // ---------- Settings ----------
-  const toggleAutoSpeak = () => {
-    const next = !autoSpeak;
-    setAutoSpeak(next);
-    writePref("sl.autoSpeak", next);
-    if (!next) stopSpeech();
-    else speak("Auto speak on.");
+  // ---------- Barcodes: spotted automatically, like the iPhone Camera's code pill ----------
+  // In every mode, the viewfinder is scanned for a product barcode a few times a second. A barcode
+  // seen twice is looked up quietly and offered as a card ("Diet Coke · Tap to hear"); nothing is
+  // read until the user taps it. The card hides when the barcode leaves the frame.
+  const setBarcodeCard = useCallback((c: BarcodeCard | null) => {
+    cardRef.current = c;
+    setBarcodeCardState(c);
+  }, []);
+
+  const fetchBarcode = useCallback(async (code: string): Promise<{ data: BarcodeResponse; ok: boolean }> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), BARCODE_TIMEOUT_MS);
+    try {
+      const res = await fetch(`/api/barcode?code=${encodeURIComponent(code)}`, { headers: deviceHeader(), signal: controller.signal });
+      return { data: (await res.json()) as BarcodeResponse, ok: res.ok };
+    } catch {
+      return { data: { code, found: false, spokenText: "", sections: [], itemKind: "none" }, ok: false };
+    } finally {
+      clearTimeout(timer);
+    }
+  }, []);
+
+  /** A barcode was confirmed: look it up and, if the product is known and still in view, show its card. */
+  const offerBarcode = useCallback(
+    async (code: string, image: string | null) => {
+      if (fetchingRef.current === code) return;
+      fetchingRef.current = code;
+      const { data, ok } = await fetchBarcode(code);
+      fetchingRef.current = null;
+      const seen = lastSeenRef.current;
+      if (!ok || !data.found || !seen || seen.code !== code || Date.now() - seen.at > BARCODE_GONE_MS) return;
+      setBarcodeCard({ code, data, image });
+      const name = data.title || "Product";
+      vibrate(30);
+      // Shown and announced to screen readers, never spoken: nothing talks unless asked.
+      setBarcodeNote(`${name} barcode. Tap the card above the shutter to hear it.`);
+    },
+    [fetchBarcode, setBarcodeCard],
+  );
+
+  /** Tap on the card: open the barcode answer and read it. */
+  const openBarcode = useCallback(() => {
+    unlockAll();
+    const c = cardRef.current;
+    if (!c || busyRef.current) return;
+    setBarcodeCard(null);
+    setBarcodeNote("");
+    stopSpeech();
+    lookupIdRef.current++;
+    setWeb(null);
+    if (c.image) setLastImage(c.image);
+    setDismissed(latest.current.result);
+    const sections = c.data.sections ?? [];
+    setResult({
+      spokenText: c.data.spokenText,
+      sections,
+      details: sections.map((x) => `${x.title}\n${x.body}`).join("\n\n"),
+      itemKind: c.data.itemKind,
+      scanId: c.data.scanId,
+      mode: "menu",
+      langCode: "en-US",
+      brand: c.data.brand,
+      barcodeCode: c.code,
+    });
+    setStatus("");
+    beepDone();
+    vibrate([40, 40, 40]);
+    say(c.data.spokenText);
+  }, [say, setBarcodeCard, stopSpeech, unlockAll]);
+
+  /** × on the card: hide it, and don't offer this barcode again for a while. */
+  const dismissBarcode = useCallback(() => {
+    const c = cardRef.current;
+    if (!c) return;
+    scanRef.current = holdCode(scanRef.current, c.code, Date.now());
+    setBarcodeCard(null);
+    setBarcodeNote("");
+  }, [setBarcodeCard]);
+
+  const sheetOpen = Boolean(result) && result !== dismissed;
+  const scanning = started && camera === "on" && features?.barcode === true && !sheetOpen && !magnify;
+  useEffect(() => {
+    if (!scanning) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const loop = async () => {
+      const video = videoRef.current;
+      const frame = frameRef.current;
+      try {
+        const detector = await getDetector();
+        if (stopped) return;
+        if (video && frame && !busyRef.current) {
+          const canvas = (scanCanvasRef.current ??= document.createElement("canvas"));
+          const rect = frame.getBoundingClientRect();
+          const k = drawVideoCrop(video, rect, canvas, 800);
+          if (k) {
+            const found = await detector.detect(canvas);
+            if (stopped) return;
+            const now = Date.now();
+            const hit = found.map((d) => ({ d, code: normalizeBarcode(d.format, d.rawValue) })).find((x) => x.code);
+            if (hit?.code) {
+              const b = hit.d.boundingBox;
+              setBarcodeBox({ x: b.x * k, y: b.y * k, w: b.width * k, h: b.height * k });
+              lastSeenRef.current = { code: hit.code, at: now };
+              if (cardRef.current?.code !== hit.code) {
+                const r = onSighting(scanRef.current, hit.code, now);
+                scanRef.current = r.state;
+                if (r.confirmed) {
+                  let image: string | null = null;
+                  try {
+                    image = captureVideoFrame(video, rect);
+                  } catch {
+                    // no photo for the answer sheet; the lookup still works
+                  }
+                  void offerBarcode(hit.code, image);
+                }
+              }
+            } else setBarcodeBox(null);
+            // Hide the card once its barcode has left the frame.
+            const card = cardRef.current;
+            const seen = lastSeenRef.current;
+            if (card && (!seen || seen.code !== card.code || now - seen.at > BARCODE_GONE_MS)) {
+              setBarcodeCard(null);
+              setBarcodeNote("");
+            }
+          }
+        }
+      } catch {
+        scanFailedRef.current = true; // no barcode reader in this browser: photos still work
+        return;
+      }
+      if (!stopped) timer = setTimeout(loop, SCAN_EVERY_MS);
+    };
+    if (!scanFailedRef.current) void loop();
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [scanning, offerBarcode, setBarcodeCard]);
+
+  /** Close the answer sheet. After a barcode answer the product is usually still in view, so wait a
+   *  moment before offering the same barcode again. */
+  const closeSheet = useCallback((r: Result) => {
+    setDismissed(r);
+    if (r.barcodeCode) scanRef.current = onAnswerClosed(scanRef.current, Date.now());
+  }, []);
+
+  // ---------- Detect: a card for whatever readable thing is in view, as in the iPhone app ----------
+  /** Show, keep or fade the card. `appeared`: a new item, so buzz and tell screen readers. */
+  const showDetection = useCallback((d: Detection | null, now = false, appeared = false) => {
+    if (!d) {
+      if (now) {
+        if (detectHideRef.current) clearTimeout(detectHideRef.current);
+        detectHideRef.current = null;
+        detectionRef.current = null;
+        setDetection(null);
+      } else if (detectionRef.current && !detectHideRef.current) {
+        detectHideRef.current = setTimeout(() => {
+          detectHideRef.current = null;
+          detectionRef.current = null;
+          setDetection(null);
+        }, DETECT_HIDE_MS);
+      }
+      return;
+    }
+    if (detectHideRef.current) clearTimeout(detectHideRef.current);
+    detectHideRef.current = null;
+    detectionRef.current = d;
+    setDetection(d);
+    if (!appeared) return;
+    vibrate(20);
+    setHint(null);
+    setBarcodeNote(`${d.label} detected. Tap the card above the shutter to read it.`);
+    // Point the mode strip at the suggestion so a plain Capture uses it too.
+    const m = latest.current.mode;
+    if (d.mode && m !== "auto" && d.mode !== m) setMode(d.mode);
+  }, []);
+
+  const detecting =
+    started && detectOn && camera === "on" && !sheetOpen && sheet === "none" && !magnify && !busy && !barcodeCard && !listening;
+  useEffect(() => {
+    if (!detecting) return;
+    autoRef.current = resumeAfterSheet(autoRef.current); // anything in view is offered again
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const loop = async () => {
+      if (stopped) return;
+      let wait = DETECT_GAP_MS;
+      const video = videoRef.current;
+      const frame = frameRef.current;
+      if (video && frame && document.visibilityState === "visible" && !busyRef.current) {
+        let image: string | null = null;
+        try {
+          image = captureVideoFrame(video, frame.getBoundingClientRect(), 512); // small and silent
+        } catch {
+          // camera not ready yet: try again shortly
+        }
+        if (image) {
+          const m = latest.current.mode;
+          try {
+            const res = await fetch("/api/frame-check", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", ...deviceHeader() },
+              body: JSON.stringify({
+                image,
+                mode: m === "auto" ? "read" : m,
+                ...(m === "translate" ? { language: latest.current.language } : {}),
+                ...lastSeen(autoRef.current), // keeps the same key for the same item
+              }),
+              signal: AbortSignal.timeout(6000),
+            });
+            if (stopped) return;
+            if (res.status === 404 || res.status === 405) {
+              setDetectOn(false); // an older server without frame-check: switch off quietly
+              return;
+            }
+            if (!res.ok) wait = DETECT_ERROR_BACKOFF_MS;
+            else {
+              const fc = (await res.json()) as Partial<FrameCheckResponse>;
+              if (stopped) return;
+              const at = Date.now();
+              const out = reduceFrame(autoRef.current, fc, at);
+              autoRef.current = out.state;
+              showDetection(out.card, false, out.appeared);
+              setDetectBox(out.card && fc.box ? { box: fc.box, at } : null);
+              // Framing tips are shown, never spoken (nothing talks unless asked).
+              if (out.speakHint) {
+                setHint(out.speakHint);
+                if (hintTimerRef.current) clearTimeout(hintTimerRef.current);
+                hintTimerRef.current = setTimeout(() => setHint(null), HINT_SHOW_MS);
+              } else if (fc.detected) setHint(null);
+            }
+          } catch {
+            if (stopped) return;
+            wait = DETECT_ERROR_BACKOFF_MS;
+          }
+        }
+      }
+      if (!stopped) timer = setTimeout(loop, wait);
+    };
+    timer = setTimeout(loop, DETECT_SETTLE_MS);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      showDetection(null, true);
+      setDetectBox(null);
+      setHint(null);
+    };
+  }, [detecting, showDetection]);
+
+  /** Tap on the card: read that item. */
+  const readDetection = useCallback(() => {
+    const d = detectionRef.current;
+    if (!d) return;
+    showDetection(null, true);
+    const m = latest.current.mode;
+    capture({ mode: m === "auto" ? "auto" : (d.mode ?? m), key: d.key });
+  }, [capture, showDetection]);
+
+  /** × on the card: hide this item for a few seconds. */
+  const dismissDetection = useCallback(() => {
+    const d = detectionRef.current;
+    if (!d) return;
+    autoRef.current = dismissCard(autoRef.current, d.key, Date.now());
+    showDetection(null, true);
+  }, [showDetection]);
+
+  // ---------- Settings (the gear at the top right, as in the iPhone app) ----------
+  const changeDetect = (v: boolean) => {
+    setDetectOn(v);
+    writePref("sl.detect", v);
   };
+
+  const changeAutoSpeak = (v: boolean) => {
+    setAutoSpeak(v);
+    writePref("sl.autoSpeak", v);
+    if (!v) stopSpeech();
+  };
+
+  const changeNatural = (v: boolean) => {
+    setNatural(v);
+    setSpeechNatural(v);
+    writePref("sl.natural", v);
+  };
+
+  const changeRate = (r: number) => {
+    setRateState(r);
+    setRate(r);
+    writePref("sl.rate", r);
+  };
+
+  /** Choose a voice and play its sample (ElevenLabs' own preview clip, so it costs no credits). */
+  const changeVoice = (v: Voice | null) => {
+    unlockAll();
+    const id = v?.id ?? "";
+    setVoiceId(id);
+    setSpeechVoice(id);
+    writePref("sl.voice", id);
+    const sample = v?.previewUrl ?? voices?.[0]?.previewUrl; // the server lists its default voice first
+    if (sample) playUrl(sample);
+    else speak("This is how I'll read your answers.");
+  };
+
+  const clearHistory = async () => {
+    try {
+      const res = await fetch("/api/history", { method: "DELETE", headers: deviceHeader() });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  };
+
+  const choosePhoto = () => {
+    unlockAll();
+    setSheet("none");
+    fileRef.current?.click();
+  };
+
+  /** A scan from Recent: show it as the answer, without reading it again. */
+  const openScan = useCallback(
+    (scan: HistoryScan) => {
+      stopSpeech();
+      lookupIdRef.current++;
+      setSheet("none");
+      setLastImage(null);
+      setDismissed(latest.current.result);
+      const sections = scan.sections ?? [];
+      setResult({
+        spokenText: scan.spokenText,
+        sections,
+        details: sections.map((x) => `${x.title}\n${x.body}`).join("\n\n"),
+        itemKind: (scan.itemKind ?? undefined) as Result["itemKind"],
+        scanId: scan.id,
+        mode: scan.mode,
+        langCode: "en-US",
+        ...(scan.imageUrl ? { photoUrl: scan.imageUrl } : {}),
+      });
+      if (scan.lookup) {
+        setWeb({ status: "done", data: scan.lookup });
+        setWebLang("en-US");
+      } else setWeb(null);
+      setStatus("");
+    },
+    [stopSpeech],
+  );
 
   const chooseRate = (r: number) => {
     setRateState(r);
@@ -764,47 +1192,24 @@ export default function SightLine() {
     if (latest.current.result) replay();
   };
 
+  /** Start, with the voice choice from the start screen (the same switch as Settings > Auto-speak). */
   const begin = () => {
     unlockAll();
+    writePref("sl.autoSpeak", autoSpeak);
     setStarted(true);
-    speak(INTRO);
+    if (autoSpeak) speak(INTRO);
     void startCamera();
   };
 
-  // ---------- Onboarding ----------
+  // ---------- Onboarding: one choice, voice or no voice ----------
   if (!started) {
-    return (
-      <main className="min-h-dvh bg-white text-black">
-        <div className="mx-auto flex min-h-dvh max-w-xl flex-col justify-center gap-8 px-6 py-10">
-          <div className="flex flex-col gap-4">
-            <svg width={56} height={56} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-              <rect x="1" y="1" width="30" height="30" rx="8" fill="#000" />
-              <ellipse cx="16" cy="16" rx="11" ry="6.8" fill="none" stroke="#fff" strokeWidth="2.6" />
-              <circle cx="16" cy="16" r="3.6" fill="#fff" />
-            </svg>
-            <h1 className="text-[34px] font-bold leading-tight tracking-tight">SightLine</h1>
-            <p className="text-[22px] font-semibold leading-snug">Point your camera. Hear the world.</p>
-            <p className="text-[17px] leading-relaxed">
-              SightLine reads text, describes what&apos;s around you, explains menus and labels, and translates signs, out loud.
-            </p>
-            <p className="text-[15px] leading-relaxed text-[#55555A]">
-              When you tap Start, your browser will ask to use the camera. Each photo is sent to an AI model to be described, and
-              product or restaurant names may be searched on the web. SightLine never saves your photos. It keeps the text of
-              recent answers so you can look back at them.
-            </p>
-          </div>
-          <button type="button" onClick={begin} className={`${pillBlack} min-h-14 text-[19px]`}>
-            {I.camera}
-            Start SightLine
-          </button>
-        </div>
-      </main>
-    );
+    return <StartScreen voice={autoSpeak} onVoice={setAutoSpeak} onStart={begin} />;
   }
 
   // ---------- Main screen: camera first, like the iPhone app ----------
   const cameraStatus = camera === "on" ? "Camera on" : camera === "starting" ? "Starting camera…" : "Camera off";
-  const showSheet = Boolean(result) && result !== dismissed;
+  const showSheet = sheetOpen && sheet === "none";
+  const photoSrc = lastImage ? `data:image/jpeg;base64,${lastImage}` : (result?.photoUrl ?? null);
   const frost = "bg-black/45 text-white backdrop-blur-md";
   const listeningText = recording ? "Listening… tap the mic when done" : "Listening…";
   // Whatever the camera's own zoom can't reach is made up by scaling the preview.
@@ -829,26 +1234,49 @@ export default function SightLine() {
       <main className="relative mx-auto flex h-dvh max-w-2xl flex-col">
         <header className="flex shrink-0 items-center justify-between gap-3 px-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
           <h1 className="sr-only">SightLine, {cameraStatus}</h1>
+          {/* Top: Detect, Recent, Settings, as in the iPhone app */}
           <button
             type="button"
-            onClick={toggleAutoSpeak}
-            aria-pressed={autoSpeak}
-            className={`inline-flex min-h-11 items-center gap-1.5 whitespace-nowrap rounded-full px-4 text-[13px] font-bold uppercase tracking-[0.08em] ${focusLight} ${
-              autoSpeak ? "bg-white text-black" : frost
+            onClick={() => changeDetect(!detectOn)}
+            aria-pressed={detectOn}
+            aria-label="Detect"
+            aria-describedby="detect-hint"
+            className={`inline-flex h-[52px] items-center gap-1.5 whitespace-nowrap rounded-full px-4 text-[13px] font-bold uppercase tracking-[0.08em] ${focusLight} ${
+              detectOn ? "bg-white text-black" : frost
             }`}
           >
-            {autoSpeak ? I.speaker : I.speakerOff}
-            Speak {autoSpeak ? "on" : "off"}
+            {I.viewfinder}
+            <span aria-hidden="true">{detectOn ? "Detect" : "Detect off"}</span>
           </button>
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            disabled={busy}
-            aria-label="Upload a photo"
-            className={`inline-flex h-11 w-11 items-center justify-center rounded-full ${frost} ${focusLight} disabled:opacity-50`}
-          >
-            {I.photo}
-          </button>
+          <span id="detect-hint" className="sr-only">
+            Offers a card when it sees something to read.
+          </span>
+          <div className="flex gap-2.5">
+            {(features?.history || features?.ask) && (
+              <button
+                type="button"
+                onClick={() => {
+                  unlockAll();
+                  setSheet("recent");
+                }}
+                aria-label="Recent scans"
+                className={`inline-flex h-[52px] w-[52px] items-center justify-center rounded-full ${frost} ${focusLight}`}
+              >
+                {I.clock}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                unlockAll();
+                setSheet("settings");
+              }}
+              aria-label="Settings"
+              className={`inline-flex h-[52px] w-[52px] items-center justify-center rounded-full ${frost} ${focusLight}`}
+            >
+              {I.gear}
+            </button>
+          </div>
           <input
             ref={fileRef}
             type="file"
@@ -882,13 +1310,91 @@ export default function SightLine() {
           <span className="absolute right-0 top-0 h-9 w-9 rounded-tr-xl border-r-[3px] border-t-[3px] border-white" />
           <span className="absolute bottom-0 left-0 h-9 w-9 rounded-bl-xl border-b-[3px] border-l-[3px] border-white" />
           <span className="absolute bottom-0 right-0 h-9 w-9 rounded-br-xl border-b-[3px] border-r-[3px] border-white" />
+          {scanning && barcodeBox && (
+            // Yellow brackets lock onto the barcode, like the iPhone app's Live Text-style brackets.
+            <div
+              className="pointer-events-none absolute"
+              style={{ left: barcodeBox.x - 6, top: barcodeBox.y - 6, width: barcodeBox.w + 12, height: barcodeBox.h + 12 }}
+            >
+              <span className="absolute left-0 top-0 h-6 w-6 rounded-tl-lg border-l-[3px] border-t-[3px] border-[#FFD60A] drop-shadow-[0_0_2px_rgba(0,0,0,0.6)]" />
+              <span className="absolute right-0 top-0 h-6 w-6 rounded-tr-lg border-r-[3px] border-t-[3px] border-[#FFD60A] drop-shadow-[0_0_2px_rgba(0,0,0,0.6)]" />
+              <span className="absolute bottom-0 left-0 h-6 w-6 rounded-bl-lg border-b-[3px] border-l-[3px] border-[#FFD60A] drop-shadow-[0_0_2px_rgba(0,0,0,0.6)]" />
+              <span className="absolute bottom-0 right-0 h-6 w-6 rounded-br-lg border-b-[3px] border-r-[3px] border-[#FFD60A] drop-shadow-[0_0_2px_rgba(0,0,0,0.6)]" />
+            </div>
+          )}
+          {detecting && detection && detectBox && !barcodeBox && (
+            // Brackets around what Detect found (the box is a fraction of the viewfinder photo).
+            <DetectBrackets box={detectBox.box} />
+          )}
           {camera !== "on" && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
               <p className="text-[17px] font-semibold">{cameraStatus}</p>
-              {camera === "unavailable" && <p className="text-[15px] text-white/85">Upload a photo with the button at the top right.</p>}
+              {camera === "unavailable" && <p className="text-[15px] text-white/85">Choose a photo with the button at the bottom left.</p>}
             </div>
           )}
         </div>
+
+        {/* Barcode card, like the iPhone Camera's code pill: tap to hear, × to hide */}
+        {barcodeCard && scanning && !busy && (
+          // Floats over the bottom of the viewfinder so the frame (and what's scanned) doesn't move.
+          <div className="relative z-10 h-0 shrink-0">
+           <div className="absolute inset-x-0 bottom-3 flex justify-center px-4">
+            <div className="flex w-full max-w-sm items-center gap-1 rounded-[22px] bg-white/90 p-1 text-black shadow-lg backdrop-blur-md">
+              <button
+                type="button"
+                onClick={openBarcode}
+                className={`flex min-h-14 min-w-0 flex-1 items-center gap-3 rounded-[18px] px-3 text-left ${focus}`}
+              >
+                {I.barcode}
+                <span className="min-w-0">
+                  <span className="block truncate text-[17px] font-semibold leading-tight">{barcodeCard.data.title || "Product"}</span>
+                  <span className="block text-[15px] leading-tight text-[#3A3A3C]">Tap to hear · Barcode</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={dismissBarcode}
+                aria-label="Hide barcode card"
+                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black/10 text-[20px] ${focus}`}
+              >
+                <span aria-hidden="true">×</span>
+              </button>
+            </div>
+           </div>
+          </div>
+        )}
+
+        {/* Detect card: "Lunch menu · Tap to read · Menu", like the iPhone app */}
+        {detecting && detection && (
+          <div className="relative z-10 h-0 shrink-0">
+            <div className="absolute inset-x-0 bottom-3 flex justify-center px-4">
+              <div className="flex w-full max-w-sm items-center gap-1 rounded-[22px] bg-white/90 p-1 text-black shadow-lg backdrop-blur-md">
+                <button
+                  type="button"
+                  onClick={readDetection}
+                  aria-label={`${detection.label} detected. Read it${detection.mode ? ` in ${MODE_LABELS[detection.mode]} mode` : ""}.`}
+                  className={`flex min-h-14 min-w-0 flex-1 items-center gap-3 rounded-[18px] px-3 text-left ${focus}`}
+                >
+                  {I.viewfinder}
+                  <span className="min-w-0">
+                    <span className="block truncate text-[17px] font-semibold leading-tight">{detection.label}</span>
+                    <span className="block text-[15px] font-semibold leading-tight text-[#3A3A3C]">
+                      Tap to read{detection.mode ? ` · ${detection.mode === "menu" ? "Menu" : MODE_LABELS[detection.mode]}` : ""}
+                    </span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={dismissDetection}
+                  aria-label="Hide card"
+                  className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black/10 text-[20px] ${focus}`}
+                >
+                  <span aria-hidden="true">×</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Status, as a frosted pill over the camera */}
         <div aria-live="polite" aria-atomic="true" className="flex min-h-11 shrink-0 justify-center px-4">
@@ -901,8 +1407,17 @@ export default function SightLine() {
             <p className="inline-flex items-center gap-2 rounded-full bg-[#D70015] px-4 py-2 text-[15px] font-semibold text-white">{listeningText}</p>
           ) : status && !showSheet ? (
             <p className={`max-w-full rounded-2xl px-4 py-2 text-center text-[15px] font-semibold ${frost}`}>{status}</p>
+          ) : detecting && hint && !detection ? (
+            <p className="inline-flex items-center gap-2 rounded-full bg-white/90 px-4 py-2 text-[15px] font-semibold text-black backdrop-blur-md">
+              {I.viewfinder}
+              {hint}
+            </p>
           ) : null}
         </div>
+        <p aria-live="polite" className="sr-only">
+          {barcodeNote}
+        </p>
+
 
         {mode === "translate" && (
           <div className="mt-2 flex shrink-0 justify-center">
@@ -977,18 +1492,31 @@ export default function SightLine() {
         {/* Shutter row: last photo, shutter, voice */}
         <div className="grid shrink-0 grid-cols-3 items-center px-6 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
           <div className="justify-self-start">
-            {lastImage && result ? (
+            {/* Last answer, or choose a photo when there isn't one yet (Settings has Choose a photo too). */}
+            {result ? (
               <button
                 type="button"
                 onClick={() => setDismissed(null)}
-                aria-label="Show the last answer"
-                className={`block h-12 w-12 overflow-hidden rounded-lg border-2 border-white ${focusLight}`}
+                aria-label={`Last answer: ${result.spokenText}`}
+                className={`flex h-14 w-14 items-center justify-center overflow-hidden rounded-xl border-2 border-white bg-black/45 ${focusLight}`}
               >
-                {/* eslint-disable-next-line @next/next/no-img-element -- in-memory data URL */}
-                <img src={`data:image/jpeg;base64,${lastImage}`} alt="" className="h-full w-full object-cover" />
+                {lastImage || result.photoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- in-memory data URL or a scan's web image
+                  <img src={lastImage ? `data:image/jpeg;base64,${lastImage}` : result.photoUrl} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  I.photo
+                )}
               </button>
             ) : (
-              <span className="block h-12 w-12" aria-hidden="true" />
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={busy}
+                aria-label="Choose a photo"
+                className={`flex h-14 w-14 items-center justify-center rounded-xl ${focusLight} disabled:opacity-50`}
+              >
+                {I.library}
+              </button>
             )}
           </div>
           <button
@@ -1029,15 +1557,15 @@ export default function SightLine() {
         >
           <div className="flex shrink-0 items-center justify-between gap-3 px-4 pb-2 pt-4">
             <h2 id="result-heading" className={caption}>
-              {result.question ? "Answer" : mode === "translate" && result.mode === "translate" ? `Translate to ${language}` : MODE_LABELS[result.mode]}
+              {result.question ? "Answer" : result.barcodeCode ? "Barcode" : mode === "translate" && result.mode === "translate" ? `Translate to ${language}` : MODE_LABELS[result.mode]}
             </h2>
-            <button type="button" onClick={() => setDismissed(result)} className={`min-h-11 rounded-xl border-2 border-black px-4 text-[17px] font-semibold ${focus}`}>
+            <button type="button" onClick={() => closeSheet(result)} className={`min-h-11 rounded-xl border-2 border-black px-4 text-[17px] font-semibold ${focus}`}>
               Done
             </button>
           </div>
 
           <div className="flex min-h-0 flex-col gap-3 overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-            {lastImage && (
+            {photoSrc && (
               <button
                 type="button"
                 onClick={() => setMagnify(true)}
@@ -1046,7 +1574,7 @@ export default function SightLine() {
                 className={`relative block w-full shrink-0 rounded-2xl ${focus}`}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element -- in-memory data URL */}
-                <img src={`data:image/jpeg;base64,${lastImage}`} alt="" className="max-h-56 w-full rounded-2xl object-cover" />
+                <img src={photoSrc} alt="" className="max-h-56 w-full rounded-2xl object-cover" />
                 <span aria-hidden="true" className="absolute bottom-3 right-3 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white">
                   {I.magnify}
                 </span>
@@ -1113,7 +1641,7 @@ export default function SightLine() {
 
             {result.details && !busy && <Sections sections={result.sections} fallback={result.details} />}
 
-            {features?.lookup && !result.error && (
+            {features?.lookup && !result.error && !result.barcodeCode && (
               <button
                 type="button"
                 onClick={() => {
@@ -1219,7 +1747,32 @@ export default function SightLine() {
         </section>
       )}
 
-      {lastImage && <Magnifier src={`data:image/jpeg;base64,${lastImage}`} open={magnify} onClose={() => setMagnify(false)} />}
+      {photoSrc && <Magnifier src={photoSrc} open={magnify} onClose={() => setMagnify(false)} />}
+
+      {sheet === "settings" && (
+        <SettingsSheet
+          features={features}
+          detect={detectOn}
+          onDetect={changeDetect}
+          autoSpeak={autoSpeak}
+          onAutoSpeak={changeAutoSpeak}
+          natural={natural}
+          onNatural={changeNatural}
+          rate={rate}
+          onRate={changeRate}
+          voices={voices}
+          voiceId={voiceId}
+          onVoice={changeVoice}
+          speaking={speech.speaking}
+          onStopSample={stopSpeech}
+          onChoosePhoto={choosePhoto}
+          onClearHistory={clearHistory}
+          onClose={() => setSheet("none")}
+        />
+      )}
+      {sheet === "recent" && (
+        <RecentSheet features={features} headers={deviceHeader} onOpen={openScan} onAnswer={(t) => say(t)} onClose={() => setSheet("none")} />
+      )}
     </div>
   );
 }

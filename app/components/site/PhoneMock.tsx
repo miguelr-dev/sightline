@@ -1,11 +1,12 @@
-// A vector recreation of SightLine's camera-first iPhone app (mobile/src/components/CameraChrome.tsx):
-// a frosted Detect pill, camera corners that turn into yellow Live Text-style brackets on a detected
-// item, a frosted detection card, the 1× · 2× · 5× zoom pill, the AUTO · READ · DESCRIBE · MENU ·
-// TRANSLATE strip, a round shutter, and the white answer sheet with its magnify badge. Decorative: the
+// A vector recreation of the SightLine app's camera screen, as the web app at /app draws it
+// (app/components/SightLine.tsx, which matches the iPhone app): a white DETECT pill, Recent and
+// Settings buttons, camera corners that turn into yellow brackets on a detected item, the white
+// detection card, the 1× · 2× · 5× zoom pill, the AUTO · READ · DESCRIBE · MENU · TRANSLATE strip
+// (barcodes are spotted in any mode), a round shutter, and the white answer sheet. Decorative: the
 // surrounding page carries the real text.
 
 /* eslint-disable @next/next/no-img-element -- static mockup imagery */
-import { ArrowUp, Chevron, Clock, Gear, Magnify, Mic, Viewfinder, Wave } from "./Icons";
+import { ArrowUp, Chevron, Clock, Gear, Magnify, Mic, Viewfinder } from "./Icons";
 
 export type StripMode = "auto" | "read" | "describe" | "menu" | "translate";
 const STRIP: { key: StripMode; label: string }[] = [
@@ -24,7 +25,7 @@ export type PhoneState = {
   mode: StripMode;
   lang?: string; // shown as "→ English" in Translate
   detect?: { title: string; sub: string; pressed?: boolean; delay?: string } | null;
-  status?: string | null; // "Reading…"
+  status?: string | null; // "Looking…"
   thumb?: string | null;
   shutterPressed?: boolean;
   sheet?: {
@@ -52,8 +53,8 @@ export function PhoneMock({ s, className = "" }: { s: PhoneState; className?: st
       </div>
 
       <div className="itop">
-        <span className="ichip frost">
-          <Viewfinder size={12} />
+        <span className="ichip on">
+          <Viewfinder size={12} dark />
           Detect
         </span>
         <span style={{ display: "flex", gap: 6 }}>
@@ -102,7 +103,17 @@ export function PhoneMock({ s, className = "" }: { s: PhoneState; className?: st
       </div>
 
       <div className="irow3">
-        {s.thumb ? <img className="ithumb" src={s.thumb} alt="" /> : <span className="ithumb-empty" />}
+        {s.thumb ? (
+          <img className="ithumb" src={s.thumb} alt="" />
+        ) : (
+          // "Choose a photo", until there is a last answer to show
+          <span className="ithumb-empty">
+            <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+              <rect x="6.5" y="3" width="14.5" height="14.5" rx="2" />
+              <path d="M3 7v12.5A1.5 1.5 0 0 0 4.5 21H17M21 13.5l-4.5-4.5-7 7" />
+            </svg>
+          </span>
+        )}
         <span className={`ishutter ${s.shutterPressed ? "pressed" : ""}`}>
           <span />
         </span>
@@ -126,11 +137,15 @@ export function PhoneMock({ s, className = "" }: { s: PhoneState; className?: st
           <p className="ans">{s.sheet.text}</p>
           <div className="ibtns">
             <span className="k">
-              {s.sheet.speaking ? <Wave small bars={3} /> : "▶"}
-              {s.sheet.speaking ? "Speaking" : "Replay"}
+              <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5" />
+                <path d="M3.5 3.5v5h5" />
+              </svg>
+              Replay
             </span>
             <span>■ Stop</span>
           </div>
+          <span className="icap">Speed</span>
           <div className="ispeed">
             <span>0.75×</span>
             <span className="on">1×</span>
@@ -145,18 +160,29 @@ export function PhoneMock({ s, className = "" }: { s: PhoneState; className?: st
               </div>
             ))}
           </div>
-          <div className="iask">
-            {s.sheet.question ? (
-              <span className="q">
-                {s.sheet.question}
-                <span className="caret" />
+          <span className="ilook">
+            <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round">
+              <circle cx="12" cy="12" r="9.5" />
+              <path d="M2.5 12h19M12 2.5c2.6 2.7 3.9 5.9 3.9 9.5s-1.3 6.8-3.9 9.5c-2.6-2.7-3.9-5.9-3.9-9.5s1.3-6.8 3.9-9.5z" />
+            </svg>
+            Look it up on the web
+          </span>
+          <div className="iaskwrap">
+            <span className="icap">Ask about this</span>
+            <div className="iask">
+              {s.sheet.question ? (
+                <span className="q">
+                  {s.sheet.question}
+                  <span className="caret" />
+                </span>
+              ) : (
+                <span className="ph3">How much is it?</span>
+              )}
+              <Mic size={11} />
+              <span className="up">
+                <ArrowUp size={11} />
               </span>
-            ) : (
-              <span className="ph3">Ask about this</span>
-            )}
-            <span className="up">
-              <ArrowUp size={11} />
-            </span>
+            </div>
           </div>
         </div>
       )}

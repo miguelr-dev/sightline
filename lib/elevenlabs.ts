@@ -4,8 +4,9 @@ export const ELEVENLABS_API = "https://api.elevenlabs.io/v1";
 
 // Flash v2.5: about 100 ms model latency and supports every language in lib/modes.ts.
 export const DEFAULT_TTS_MODEL = "eleven_flash_v2_5";
-// "George" (warm, clear narrator), one of ElevenLabs' default voices.
-export const DEFAULT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb";
+// "Matilda" (knowledgeable, professional, American), one of ElevenLabs' default voices.
+// The demo video's narrator uses the same voice (scripts/voiceover.mjs).
+export const DEFAULT_VOICE_ID = "XrExE9yKIg1WjnnlVkGX";
 export const DEFAULT_STT_MODEL = "scribe_v3";
 export const FALLBACK_STT_MODEL = "scribe_v2";
 

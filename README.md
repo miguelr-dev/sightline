@@ -127,7 +127,7 @@ Open http://localhost:3000. Browsers only allow the camera on `localhost` or HTT
 | `ANTHROPIC_MODEL` | No | `claude-haiku-5-5` | Model for reading photos. Haiku 5.5 with thinking off was the fastest model that still read text accurately in our tests (about 2.5 s per photo, against 3.5 s for Opus 5.5). |
 | `ANTHROPIC_FAST_MODEL` | No | `claude-haiku-5-5` | Model for web-lookup summaries and auto-capture frame checks. |
 | `ELEVENLABS_API_KEY` | No | | Turns on ElevenLabs voices and Scribe voice input. The key needs Text to Speech and Speech to Text access. Without it, SightLine uses the browser's voice. |
-| `ELEVENLABS_VOICE_ID` | No | `JBFqnCBsd6RMkjVDRZzb` ("George") | Any voice ID from your ElevenLabs voice library. |
+| `ELEVENLABS_VOICE_ID` | No | `XrExE9yKIg1WjnnlVkGX` ("Matilda") | Any voice ID from your ElevenLabs voice library. |
 | `ELEVENLABS_MODEL_ID` | No | `eleven_flash_v2_5` | Text-to-speech model. Flash v2.5 has about 100 ms model latency and covers every Translate language. |
 | `ELEVENLABS_STT_MODEL_ID` | No | `scribe_v3` | Speech-to-text model for voice commands. Falls back to `scribe_v2` if it's rejected. |
 | `BRIGHTDATA_API_KEY` | No | | Turns on the web lookup, together with the zone below. |
@@ -143,6 +143,8 @@ Open http://localhost:3000. Browsers only allow the camera on `localhost` or HTT
 4. Click **Deploy**. Open the URL on your phone and choose **Add to Home Screen**.
 
 Or from the command line: `npx vercel`, then `npx vercel env add ANTHROPIC_API_KEY`, then `npx vercel --prod`.
+
+To copy the optional keys from your `.env.local` to the production project in one go, run `npm run env:push -- --check` (lists which keys you have, names only), then `npm run env:push`. It adds `ELEVENLABS_API_KEY`, `BRIGHTDATA_API_KEY`, `BRIGHTDATA_SERP_ZONE`, `DATABASE_URL` and `DEVICE_SHARED_KEY` as Production secrets, passing each value on stdin so it never shows on screen, then redeploys and prints `/api/features`. It's set up for our Vercel project (`scripts/push-env.mjs`).
 
 ## Accessibility
 

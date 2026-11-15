@@ -14,9 +14,12 @@ export const IMG = {
   medicinePortrait: "/site/medicine-portrait.webp",
 };
 
-export const HERO_LINE = "A fixed-price lunch for 14 euros 90. Bread and a glass of wine are included.";
+// The menu lines are a literal translation of the chalkboard in the photo (public/site/menu.webp):
+// "MENÚ DEL DÍA: 1º Gazpacho andaluz, o Ensalada mixta. 2º El guiso de hoy, o Asado ibérico en su
+// jugo con patatas. POSTRE: Fruta natural, o helado, o café. Pan y copa de vino: 14'90€".
 export const MENU_LINE =
-  "This is a Spanish menu of the day, a fixed-price lunch for 14 euros 90. Bread and a glass of wine are included.";
+  "Menu of the day: 1st: Andalusian gazpacho, or mixed salad. 2nd: Today's stew, or Iberian roast in its juices with potatoes. Dessert: Fresh fruit, or ice cream, or coffee. Bread and a glass of wine: €14.90.";
+export const HERO_LINE = MENU_LINE;
 
 export type ModeKey = "read" | "describe" | "menu" | "translate";
 
@@ -69,7 +72,7 @@ export const SAMPLES = [
     mode: "Translate",
     img: IMG.menu,
     alt: "A chalkboard Menú del día in Spanish beside café tables in Seville.",
-    said: "This is a Spanish chalkboard menu of the day, a fixed-price lunch for 14 euros 90. First course: Andalusian gazpacho, a cold tomato and vegetable soup, or a mixed salad. Second course: today's stew, or Iberian pork roast in its own juices with potatoes. Dessert: fresh fruit, ice cream, or coffee. Bread and a glass of wine are included.",
+    said: "This is a Spanish chalkboard menu of the day. First course: Andalusian gazpacho, a cold tomato and vegetable soup, or a mixed salad. Second course: today's stew, or Iberian pork roast in its own juices with potatoes. Dessert: fresh fruit, ice cream, or coffee. Bread and a glass of wine: 14 euros 90.",
   },
   {
     title: "Street sign",
@@ -94,14 +97,15 @@ export const SAMPLES = [
   },
 ];
 
+// Long enough for Matilda (the app's voice) to finish each chapter's answer; see VOICE in DemoFilm.tsx.
 export const CHAPTERS = [
-  { s: 0, e: 15, title: "It spots the menu" },
-  { s: 15, e: 28, title: "Just ask" },
-  { s: 28, e: 44, title: "Read any sign" },
-  { s: 44, e: 58, title: "Know what you’re holding" },
-  { s: 58, e: 70, title: "Hear the world" },
+  { s: 0, e: 25, title: "It spots the menu" },
+  { s: 25, e: 40, title: "Just ask" },
+  { s: 40, e: 56, title: "Read any sign" },
+  { s: 56, e: 76, title: "Know what you’re holding" },
+  { s: 76, e: 88, title: "Hear the world" },
 ];
-export const FILM_LENGTH = 70;
+export const FILM_LENGTH = 88;
 
 export const MORE_FEATURES = [
   { title: "Auto mode", body: "Leave it on Auto and SightLine works out whether you're showing it a menu, a label, a sign, or a room, and answers the right way." },

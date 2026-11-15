@@ -41,3 +41,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .claude/
+
+# voiceover scratch files (scripts/voiceover.mjs)
+video/voiceover/sample-*
+video/voiceover/.gap.mp3
+video/voiceover/concat.txt

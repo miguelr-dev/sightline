@@ -20,7 +20,11 @@ export type Settings = {
   deviceId: string; // random, made once; sent as x-sightline-device so the server can keep history
 };
 
-export const ENV_API_URL = (process.env.EXPO_PUBLIC_API_URL ?? "").trim().replace(/\/+$/, "");
+// The live site. Used when mobile/.env doesn't set EXPO_PUBLIC_API_URL, so the app works on any
+// Wi-Fi without the Mac running a server.
+export const PRODUCTION_API_URL = "https://sightline-theta-drab.vercel.app";
+export const ENV_API_URL =
+  (process.env.EXPO_PUBLIC_API_URL ?? "").trim().replace(/\/+$/, "") || PRODUCTION_API_URL;
 
 export const DEFAULT_SETTINGS: Settings = {
   apiUrl: "",

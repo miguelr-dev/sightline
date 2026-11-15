@@ -12,11 +12,14 @@
     "device:code": "node --env-file=.env.local scripts/device-code.mjs",
     "demo:info": "node --env-file=.env.local scripts/demo-info.mjs",
     "sim": "node --env-file=.env.local hardware/sim-board.mjs",
-    "flash": "./hardware/flash.sh"
+    "flash": "./hardware/flash.sh",
+    "voiceover": "node --env-file=.env.local scripts/voiceover.mjs",
+    "env:push": "node --env-file=.env.local scripts/push-env.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
     "@neondatabase/serverless": "1.2.0",
+    "barcode-detector": "3.2.3",
     "lucide-react": "1.65.0",
     "next": "16.4.6",
     "react": "19.3.0",
