@@ -13,7 +13,8 @@
     "demo:info": "node --env-file=.env.local scripts/demo-info.mjs",
     "sim": "node --env-file=.env.local hardware/sim-board.mjs",
     "flash": "./hardware/flash.sh",
-    "voiceover": "node --env-file=.env.local scripts/voiceover.mjs"
+    "voiceover": "node --env-file=.env.local scripts/voiceover.mjs",
+    "env:push": "node --env-file=.env.local scripts/push-env.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",

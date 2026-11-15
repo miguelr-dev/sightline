@@ -144,6 +144,8 @@ Open http://localhost:3000. Browsers only allow the camera on `localhost` or HTT
 
 Or from the command line: `npx vercel`, then `npx vercel env add ANTHROPIC_API_KEY`, then `npx vercel --prod`.
 
+To copy the optional keys from your `.env.local` to the production project in one go, run `npm run env:push -- --check` (lists which keys you have, names only), then `npm run env:push`. It adds `ELEVENLABS_API_KEY`, `BRIGHTDATA_API_KEY`, `BRIGHTDATA_SERP_ZONE`, `DATABASE_URL` and `DEVICE_SHARED_KEY` as Production secrets, passing each value on stdin so it never shows on screen, then redeploys and prints `/api/features`. It's set up for our Vercel project (`scripts/push-env.mjs`).
+
 ## Accessibility
 
 Accessibility is the product, so it was designed in from the start:
