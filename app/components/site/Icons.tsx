@@ -59,6 +59,13 @@ export const Speaker = ({ size = 18 }: P) => (
   </svg>
 );
 
+export const SpeakerOff = ({ size = 18 }: P) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinejoin="round" strokeLinecap="round" {...base}>
+    <path d="M4 9h3.5L13 4.5v15L7.5 15H4z" />
+    <path d="M16.5 9.5l5 5M21.5 9.5l-5 5" />
+  </svg>
+);
+
 export const Sparkle = ({ size = 11 }: P) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" {...base}>
     <path d="M12 2l1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9z" />
