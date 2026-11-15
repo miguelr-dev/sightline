@@ -76,10 +76,10 @@ function frameAt(t: number): Frame {
   const lt = t - CHAPTERS[ci].s;
   const phone: PhoneState = { img: IMG.menuPortrait, mode: "auto", vfClass: lt < 1.8 ? "locking" : "", lang: "English" };
   const f: Frame = { phone, ci, caption: "", showCaption: true, showLang: false, question: "", showQuestion: false, lines: [], speaking: false, final: false };
-  // Tap the shutter at 2s, then "Reading…" until 4s, as in the app.
+  // Tap the shutter at 2s, then "Looking…" until 4s, as in the app.
   const shoot = () => {
     phone.shutterPressed = lt >= 2 && lt < 2.35;
-    phone.status = lt >= 2.35 && lt < 4 ? "Reading…" : null;
+    phone.status = lt >= 2.35 && lt < 4 ? "Looking…" : null;
   };
   const translateTitle = "Translate to English";
 
@@ -90,12 +90,12 @@ function frameAt(t: number): Frame {
       phone.detect = { title: "Menú del día", sub: "Tap to read · Translate", pressed: lt >= 3 };
       phone.vfClass = "track"; // the brackets lock onto the menu board
     }
-    phone.status = lt >= 3.3 && lt < 4.6 ? "Reading…" : null;
+    phone.status = lt >= 3.3 && lt < 4.6 ? "Looking…" : null;
     const n = lt < voice("menu").at ? 0 : Math.ceil(progress("menu", lt) * MENU_WORDS);
     f.caption = lt < 1.4 ? "" : lt < 4.6 ? "Menu detected. Tap to read." : words(MENU_LINE, n);
     f.speaking = voicing("menu", lt);
     // The same sections the app shows for a translated menu.
-    if (lt >= 4.6) phone.sheet = { mode: "Auto · Translate", img: IMG.menu, text: words(MENU_LINE, n), sections: ["Translation", "Original text"], speaking: f.speaking };
+    if (lt >= 4.6) phone.sheet = { mode: "Translate", img: IMG.menu, text: words(MENU_LINE, n), sections: ["Translation", "Original text"], speaking: f.speaking };
   } else if (ci === 1) {
     // Ask about the same photo from the answer sheet.
     phone.vfClass = "";
@@ -108,7 +108,7 @@ function frameAt(t: number): Frame {
     f.caption = words(ANSWER, n);
     f.speaking = voicing("answer", lt);
     phone.sheet = {
-      mode: "Auto · Translate",
+      mode: lt < 5.2 ? "Translate" : "Answer",
       img: IMG.menu,
       text: lt < 4.4 ? MENU_LINE : lt < 5.2 ? "Thinking…" : words(ANSWER, n),
       sections: ["Translation", "Original text"],

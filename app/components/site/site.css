@@ -46,6 +46,7 @@
 .frost-l{background:rgba(255,255,255,.88);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);color:#000}
 .itop{position:absolute;top:40px;left:10px;right:10px;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:6px}
 .ichip{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:7px 11px;font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;line-height:1}
+.ichip.on{background:#fff;color:#000}
 .icirc{width:30px;height:30px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center}
 .ifloat{position:absolute;left:50%;transform:translateX(-50%);z-index:5;white-space:nowrap}
 .idetect{bottom:172px;display:flex;align-items:center;gap:8px;border-radius:18px;padding:7px 8px 7px 10px;animation:pop .4s cubic-bezier(.2,.7,.1,1) both;transition:transform .15s ease}
@@ -67,7 +68,7 @@
 .istrip span.sel{color:#FFD60A}.istrip span.sel i{background:#FFD60A}
 .irow3{position:absolute;left:22px;right:22px;bottom:20px;z-index:5;display:grid;grid-template-columns:1fr auto 1fr;align-items:center}
 .ithumb{width:34px;height:34px;border-radius:8px;border:2px solid #fff;object-fit:cover;justify-self:start}
-.ithumb-empty{width:34px;height:34px;justify-self:start}
+.ithumb-empty{width:34px;height:34px;justify-self:start;display:flex;align-items:center;justify-content:center}
 .ishutter{width:56px;height:56px;border-radius:50%;border:3px solid #fff;display:flex;align-items:center;justify-content:center}
 .ishutter span{width:44px;height:44px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;transition:transform .15s ease}
 .ishutter.pressed span{transform:scale(.82)}
@@ -78,7 +79,7 @@
 .iresult .hd{display:flex;justify-content:space-between;align-items:center;font-size:9.5px;font-weight:700;letter-spacing:.06em;color:#55555A;text-transform:uppercase}
 .iresult .hd b{font-size:11px;color:#000;letter-spacing:0;text-transform:none;border:1.5px solid #000;border-radius:8px;padding:3px 8px}
 .iresult .ph2{width:100%;height:92px;border-radius:12px;object-fit:cover;flex:none}
-.iresult .ans{margin:0;font-size:13px;line-height:1.32;font-weight:400;min-height:52px}
+.iresult .ans{margin:0;font-size:13px;line-height:1.32;font-weight:400;min-height:52px;flex:none;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;line-clamp:4;overflow:hidden}
 .ibtns{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .ibtns > span{display:inline-flex;align-items:center;justify-content:center;gap:4px;border-radius:999px;padding:7px 10px;font-size:11px;font-weight:700;background:#F2F2F7;color:#000}
 .ibtns > span.k{background:#000;color:#fff}
@@ -86,9 +87,12 @@
 .ispeed span{text-align:center;font-size:9.5px;font-weight:700;padding:4px 0;border-radius:7px;color:#000}
 .ispeed span.on{background:#000;color:#fff}
 .isec{display:flex;justify-content:space-between;align-items:center;font-size:11.5px;font-weight:600;padding:6px 1px;border-top:1px solid #E5E5EA}
-.iask{display:flex;align-items:center;gap:6px;background:#F2F2F7;border-radius:12px;padding:7px 7px 7px 10px;font-size:11px;margin-top:auto}
+.icap{font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#55555A;margin-bottom:-4px}
+.ilook{display:flex;align-items:center;justify-content:center;gap:5px;border-radius:999px;padding:7px 10px;font-size:11px;font-weight:700;background:#F2F2F7;color:#000;flex:none}
+.iaskwrap{display:flex;flex-direction:column;gap:6px;margin-top:auto;border-top:1px solid #E5E5EA;padding-top:7px}
+.iask{display:flex;align-items:center;gap:6px;background:#F2F2F7;border-radius:12px;padding:7px 7px 7px 10px;font-size:11px}
 .iask .q{flex:1;min-width:0;color:#000}
-.iask .ph3{flex:1;color:#48484D}
+.iask .ph3{flex:1;color:#55555A}
 .iask .up{width:22px;height:22px;border-radius:50%;background:#000;color:#fff;display:flex;align-items:center;justify-content:center;flex:none}
 .ios .ibtns .k .wave i{background:#fff}
 @keyframes slideup{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
