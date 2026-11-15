@@ -1,16 +1,7 @@
 "use client";
 
 import * as React from "react";
-import {
-  ChevronDown,
-  Languages,
-  Mic,
-  Pause,
-  Rewind,
-  Scan,
-  SkipForward,
-  TriangleAlert,
-} from "lucide-react";
+import { ChevronDown, Mic, Pause, Rewind, Scan, SkipForward, TriangleAlert } from "lucide-react";
 
 import {
   CoverflowCarousel,
@@ -18,7 +9,19 @@ import {
   type CoverflowSlideState,
 } from "@/components/ui/coverflow-carousel";
 
-import { Brackets, ModeChip, Scene, Screen, Sheet, Words, boxStyle, on, wordsAt, type Box } from "./demo-parts";
+import {
+  Brackets,
+  MENU,
+  ModeChip,
+  Scene,
+  Screen,
+  Sheet,
+  Words,
+  boxStyle,
+  on,
+  wordsAt,
+  type Box,
+} from "./demo-parts";
 
 /* ------------------------------------------------------------------------ */
 /* Demo clock                                                                */
@@ -195,47 +198,57 @@ function BarcodeDemo({ active, state }: DemoProps) {
 }
 
 /* ------------------------------------------------------------------------ */
-/* 3. Recalls, said first                                                    */
+/* 3. Know what's inside                                                     */
 /* ------------------------------------------------------------------------ */
 
-const RECALL_LINE =
-  "Tylenol Extra Strength: recalled November 2025 for defective container. Check your lot number.";
+// The live /api/analyze answer for this photo, word for word. "Contains
+// peanuts" is from the same answer's details, read on the package.
+const SNACK_LINE =
+  "Nutter Butter Bites peanut butter sandwich cookies, 1 ounce package, 140 calories per serving.";
 
-function RecallDemo({ active, state }: DemoProps) {
-  const t = useDemoClock(active, state, 6600, 5400);
-  const words = RECALL_LINE.split(" ").length;
-  const said = wordsAt(t, 2000, 175, words);
+function SnackDemo({ active, state }: DemoProps) {
+  const t = useDemoClock(active, state, 6800, 6000);
+  const said = wordsAt(t, 2800, 170, SNACK_LINE.split(" ").length);
   return (
     <DemoCard
-      title={["Recalls,", "said first"]}
-      description={`Before anything else, SightLine warns about a recall it found on the web: ${RECALL_LINE}`}
+      title={["Know what’s", "inside"]}
+      description={`SightLine spots a snack pouch, flags that it contains peanuts, and says: ${SNACK_LINE}`}
       frozen={state.paused}
     >
       <Scene
         eager
-        src="/new/pills.webp"
-        alt="White tablets in a blister pack, seen up close."
-        ratio={[278, 440]}
+        src="/new/nutter-butter.webp"
+        alt="A hand holding a red pouch of Nutter Butter Bites peanut butter sandwich cookies."
+        ratio={[720, 1520]}
+        fx={50}
       >
         <Brackets
-          show={t >= 200 && t < 1450}
-          box={t < 400 ? { l: 13, t: 9, w: 74, h: 66 } : { l: 19, t: 17, w: 62, h: 46 }}
+          show={t >= 200 && t < 2400}
+          box={t < 400 ? { l: 2, t: 9, w: 96, h: 50 } : { l: 6.5, t: 14, w: 89, h: 35 }}
         />
       </Scene>
       <ModeChip>AUTO</ModeChip>
+      <div className="dc-pill" data-on={on(t >= 1100 && t < 2250)} aria-hidden>
+        <Scan strokeWidth={2.4} />
+        <span className="dc-pill-t">
+          <b>Nutter Butter Bites</b>
+          <span>Tap to read</span>
+        </span>
+        <span className="dc-ripple" data-on={on(t >= 1850)} />
+      </div>
       <Sheet
-        show={t >= 1300}
-        label="From the web"
-        speaking={said > 0 && t < 4500}
+        show={t >= 2300}
+        label="Auto · Label"
+        speaking={said > 0 && t < 5300}
         badge={
-          <span className="dc-alert" data-on={on(t >= 1650)}>
+          <span className="dc-alert dc-alert-warn" data-on={on(t >= 2650)}>
             <TriangleAlert strokeWidth={2.6} />
-            Recall
+            Peanuts
           </span>
         }
       >
         <p className="dc-say">
-          <Words text={RECALL_LINE} shown={said} />
+          <Words text={SNACK_LINE} shown={said} />
         </p>
       </Sheet>
     </DemoCard>
@@ -247,29 +260,20 @@ function RecallDemo({ active, state }: DemoProps) {
 /* ------------------------------------------------------------------------ */
 
 const MENU_QUESTION = "How much was the first one?";
-const MENU_ANSWER = "Tomato Basil Soup is 7 dollars and 50 cents.";
+const MENU_ANSWER = "The Grilled Chicken Plate is 12 dollars and 79 cents.";
 
 function MenuDemo({ active, state }: DemoProps) {
   const t = useDemoClock(active, state, 7000, 6000);
   const asked = wordsAt(t, 700, 210, MENU_QUESTION.split(" ").length);
-  const said = wordsAt(t, 2900, 200, MENU_ANSWER.split(" ").length);
+  const said = wordsAt(t, 2900, 190, MENU_ANSWER.split(" ").length);
   return (
     <DemoCard
       title={["Ask about", "the menu"]}
-      screen="#7a6a5a"
-      description={`You hold the mic and ask, “${MENU_QUESTION}” SightLine remembers the Harbor Table menu you scanned and answers: ${MENU_ANSWER}`}
+      description={`You hold the mic and ask, “${MENU_QUESTION}” SightLine remembers the Retro Family Restaurant menu you scanned and answers: ${MENU_ANSWER}`}
       frozen={state.paused}
     >
-      <Scene
-        eager
-        src="/new/menu.webp"
-        alt="The Harbor Table lunch menu, with starters, mains and desserts."
-        ratio={[720, 960]}
-        width="112cqw"
-        top="1cqw"
-        fx={49}
-      >
-        <span className="dc-mark" data-on={on(t >= 2250)} style={boxStyle({ l: 6, t: 23.6, w: 86, h: 5.4 })} />
+      <Scene eager src={MENU.src} alt={MENU.alt} ratio={MENU.ratio} fx={31}>
+        <span className="dc-mark" data-on={on(t >= 2250)} style={boxStyle(MENU.firstRow)} />
       </Scene>
       <div className="dc-ask" data-on={on(t >= 450)} aria-hidden>
         <small>You asked</small>
@@ -281,7 +285,7 @@ function MenuDemo({ active, state }: DemoProps) {
       <span className="dc-mic" data-on={on(t >= 200 && t < 2500)} aria-hidden>
         <Mic strokeWidth={2.2} />
       </span>
-      <Sheet show={t >= 2500} label="Ask · Harbor Table menu" speaking={said > 0 && t < 5000}>
+      <Sheet show={t >= 2500} label="Ask · Retro Family menu" speaking={said > 0 && t < 5000}>
         <p className="dc-say">
           <Words text={MENU_ANSWER} shown={said} />
         </p>
@@ -340,43 +344,39 @@ function BookDemo({ active, state }: DemoProps) {
 }
 
 /* ------------------------------------------------------------------------ */
-/* 6. Translate any sign                                                     */
+/* 6. Read any sign                                                          */
 /* ------------------------------------------------------------------------ */
 
-const SIGN_LINE = "Caution. Sidewalk work. Cross on the other side.";
+// The live /api/analyze answer for this photo, word for word.
+const SIGN_LINE =
+  "Ciao! sandwich board: open daily for lunch and dinner, 11 AM to 9 PM, hot pasta to go.";
 
 function SignDemo({ active, state }: DemoProps) {
-  const t = useDemoClock(active, state, 6600, 5600);
-  const said = wordsAt(t, 2900, 200, SIGN_LINE.split(" ").length);
-  const sign: Box = { l: 15.3, t: 26.4, w: 69.4, h: 15.4 };
+  const t = useDemoClock(active, state, 7000, 6200);
+  const said = wordsAt(t, 2800, 150, SIGN_LINE.split(" ").length);
+  // The sign's lettering, from OPEN down to the web address.
+  const text: Box = { l: 35.5, t: 16.5, w: 39.5, h: 76 };
   return (
     <DemoCard
-      title={["Translate", "any sign"]}
-      description={`A Spanish street sign reads “Precaución. Obras en la acera. Cruce por el otro lado.” SightLine translates it and says: ${SIGN_LINE}`}
+      title={["Read any", "sign"]}
+      description={`A red sandwich board outside a pasta shop. SightLine reads it and says: ${SIGN_LINE}`}
       frozen={state.paused}
     >
       <Scene
         eager
-        src="/new/sign.webp"
-        alt="A red Spanish street sign reading Precaución, Obras en la acera, Cruce por el otro lado, above a Calle Mayor sign."
-        ratio={[760, 1302]}
+        src="/new/ciao-sign.webp"
+        alt="A red sandwich board on the pavement: Open. Ciao! Hot pasta-to-go. Open daily, serving lunch and dinner, 11 AM to 9 PM, with a phone number and ciaopasta.com."
+        ratio={[864, 1080]}
+        fx={60}
       >
         <Brackets
           show={t >= 200 && t < 2500}
-          box={t < 400 ? { l: 5, t: 17, w: 90, h: 36 } : { l: 12.6, t: 24.6, w: 74.8, h: 19 }}
+          box={t < 400 ? { l: 31, t: 4, w: 58, h: 93 } : { l: 33.5, t: 11, w: 50, h: 85 }}
         />
-        <span className="dc-en" data-on={on(t >= 1750)} style={boxStyle(sign)}>
-          <b>CAUTION</b>
-          <strong>Sidewalk work</strong>
-          <span>Cross on the other side</span>
-        </span>
-        <span className="dc-sweep" data-on={on(t >= 1100 && t < 2300)} style={boxStyle(sign)} />
+        <span className="dc-sweep" data-on={on(t >= 1100 && t < 2300)} style={boxStyle(text)} />
       </Scene>
-      <span className="dc-lang" data-on={on(t >= 500)} aria-hidden>
-        <Languages strokeWidth={2.4} />
-        Spanish → English
-      </span>
-      <Sheet show={t >= 2500} label="Translate · Spanish" speaking={said > 0 && t < 4900}>
+      <ModeChip>AUTO</ModeChip>
+      <Sheet show={t >= 2500} label="Auto · Read" speaking={said > 0 && t < 5700}>
         <p className="dc-say">
           <Words text={SIGN_LINE} shown={said} />
         </p>
@@ -394,10 +394,10 @@ function SignDemo({ active, state }: DemoProps) {
 const SLIDES: CoverflowSlide[] = [
   { label: "Point at anything", duration: 6500, render: (a, s) => <PointDemo active={a} state={s} /> },
   { label: "Scan any barcode", duration: 6500, render: (a, s) => <BarcodeDemo active={a} state={s} /> },
-  { label: "Recalls, said first", duration: 6300, render: (a, s) => <RecallDemo active={a} state={s} /> },
+  { label: "Know what’s inside", duration: 6500, render: (a, s) => <SnackDemo active={a} state={s} /> },
   { label: "Ask about the menu", duration: 6700, render: (a, s) => <MenuDemo active={a} state={s} /> },
   { label: "Read any book aloud", duration: 6900, render: (a, s) => <BookDemo active={a} state={s} /> },
-  { label: "Translate any sign", duration: 6300, render: (a, s) => <SignDemo active={a} state={s} /> },
+  { label: "Read any sign", duration: 6700, render: (a, s) => <SignDemo active={a} state={s} /> },
 ];
 
 export function HeroCarousel() {

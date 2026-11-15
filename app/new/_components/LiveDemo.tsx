@@ -25,32 +25,39 @@ type Sample = {
   saved: { spokenText: string; mode: Mode; sections: Section[] };
 };
 
+// Saved answers are what the live API said for these exact photos.
 const SAMPLES: Sample[] = [
   {
     id: "menu",
     label: "Menu",
-    src: "/demo/menu.jpg",
-    alt: "The Harbor Table lunch menu, with starters, mains and desserts.",
-    ratio: [1200, 1600],
+    src: "/new/retro-menu.webp",
+    alt: "The Retro Family Restaurant menu: main course, salads and soups, rice and noodles, beverages, pizza and sides.",
+    ratio: [900, 1164],
     mode: "auto",
     verb: "Reading the menu",
     saved: {
-      spokenText: "Harbor Table lunch menu: starters, mains and desserts, 7 to 24 dollars.",
+      spokenText:
+        "Retro Family Restaurant menu: six sections, main course, rice and noodles, pizza, salads and soups, beverages, and sides, 1.99 to 16.49 dollars.",
       mode: "menu",
       sections: [
         {
-          title: "Starters",
-          body: "Tomato Basil Soup (V): $7.50\nCrispy Calamari: $12.00\nCaesar Salad: $10.00",
+          title: "Main Course",
+          body: "Grilled Chicken Plate, $12.79. Tender grilled chicken served with vegetables and garlic rice.\nBeef Steak Classic, $16.49. Seared beef steak with pepper sauce and potato wedges.\nCreamy Alfredo Pasta, $11.29. Soft pasta in creamy alfredo sauce with parmesan.\nSweet & Sour Fish, $13.59. Crispy fish fillet in sweet-sour glaze.",
           provenance: "label",
         },
         {
-          title: "Mains",
-          body: "Grilled Salmon, lemon butter: $24.00\nMushroom Risotto (V, GF): $18.00\nFish Tacos (spicy): $16.50\nClassic Cheeseburger: $15.00",
+          title: "Salads & Soups",
+          body: "Garden Fresh Salad, $7.49. Crisp greens with tomatoes, cucumbers, and house dressing.\nGrilled Chicken Salad, $9.79. Fresh salad topped with grilled chicken slices.\nCreamy Mushroom Soup, $5.29. Warm, rich mushroom soup with toast.\nTomato Basil Soup, $4.99. Smooth tomato soup with a hint of basil.",
           provenance: "label",
         },
         {
-          title: "Desserts",
-          body: "Chocolate Lava Cake: $9.00\nLemon Sorbet (VG, GF): $6.50",
+          title: "Rice & Noodles",
+          body: "Fried Rice Special, $9.29. Rice stir-fried with veggies, egg, and chicken.\nTeriyaki Rice Bowl, $10.49. Chicken in teriyaki sauce over warm rice.\nClassic Chow Mein, $8.99. Savory noodles with vegetables and chicken.\nBeef Black Pepper Rice, $11.79. Beef strips in black pepper sauce served with rice.",
+          provenance: "label",
+        },
+        {
+          title: "Beverages",
+          body: "Iced Lemon Tea, $2.99. Refreshing sweet lemon tea.\nFresh Orange Juice, $3.79. Made from fresh oranges.\nMilkshake, $4.29. Vanilla, chocolate, or strawberry.\nCoffee or Hot Tea, $1.99. Simple and warm.",
           provenance: "label",
         },
       ],
@@ -73,18 +80,18 @@ const SAMPLES: Sample[] = [
   {
     id: "sign",
     label: "Sign",
-    src: "/demo/spanish-sign.jpg",
-    alt: "A red Spanish street sign: Precaución, Obras en la acera, Cruce por el otro lado.",
-    ratio: [1400, 1000],
-    mode: "translate",
-    verb: "Translating the sign",
+    src: "/new/ciao-sign.webp",
+    alt: "A red sandwich board: Open. Ciao! Hot pasta-to-go. Open daily, serving lunch and dinner, 11 AM to 9 PM.",
+    ratio: [864, 1080],
+    mode: "auto",
+    verb: "Reading the sign",
     saved: {
-      spokenText: "Caution. Sidewalk work. Cross on the other side.",
-      mode: "translate",
+      spokenText: "Ciao! sandwich board: open daily for lunch and dinner, 11 AM to 9 PM, hot pasta to go.",
+      mode: "read",
       sections: [
         {
-          title: "Original, in Spanish",
-          body: "Precaución. Obras en la acera. Cruce por el otro lado.",
+          title: "Full text",
+          body: "OPEN\nCiao!\nHOT PASTA-TO-GO\nOPEN DAILY\nSERVING LUNCH & DINNER\n11AM - 9PM\n(03) 326 6180 654\nCIAOPASTA.COM",
           provenance: "label",
         },
       ],

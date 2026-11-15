@@ -490,7 +490,7 @@ body:has(.sl-new) {
     color: #3a3a3c;
   }
 
-  /* Recall chip: said first, in red. */
+  /* Alert chip, said first: red for a recall, yellow for an allergen. */
   .dc-alert {
     display: inline-flex;
     align-items: center;
@@ -515,6 +515,11 @@ body:has(.sl-new) {
   .dc-alert > svg {
     width: 3.8cqw;
     height: 3.8cqw;
+  }
+  /* Allergen chip: the app's yellow, black text. */
+  .dc-alert-warn {
+    background: var(--accent);
+    color: #000000;
   }
 
   /* Menu: the asked question, the mic and the highlighted line. */
@@ -603,7 +608,7 @@ body:has(.sl-new) {
     mix-blend-mode: multiply;
     box-shadow: 0 0 0 0.5cqw var(--accent);
     opacity: 0;
-    transform: rotate(-1.3deg) scaleX(0.4);
+    transform: scaleX(0.4);
     transform-origin: left center;
     transition:
       opacity 0.3s ease,
@@ -611,7 +616,7 @@ body:has(.sl-new) {
   }
   .dc-mark[data-on] {
     opacity: 1;
-    transform: rotate(-1.3deg);
+    transform: none;
   }
 
   /* Book mode: a white page with the spoken sentence highlighted. */
@@ -699,41 +704,7 @@ body:has(.sl-new) {
     color: #ffffff;
   }
 
-  /* Sign translation, drawn over the sign itself. */
-  .dc-en {
-    position: absolute;
-    z-index: 4;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 0.9cqw;
-    border-radius: 1.4cqw;
-    background: #c80f2e;
-    color: #ffffff;
-    text-align: center;
-    opacity: 0;
-    transition: opacity 0.45s ease;
-  }
-  .dc-en[data-on] {
-    opacity: 1;
-  }
-  .dc-en b {
-    font-size: 8.8cqw;
-    font-weight: 800;
-    letter-spacing: 0.01em;
-    line-height: 1;
-  }
-  .dc-en strong {
-    font-size: 5.6cqw;
-    font-weight: 700;
-    line-height: 1.1;
-  }
-  .dc-en span {
-    font-size: 4.6cqw;
-    font-weight: 450;
-    line-height: 1.1;
-  }
+  /* A reading sweep across the sign's lettering. */
   .dc-sweep {
     position: absolute;
     z-index: 5;
@@ -755,36 +726,6 @@ body:has(.sl-new) {
   }
   .dc-sweep[data-on]::after {
     animation: dc-sweep 0.75s ease-in-out forwards;
-  }
-  .dc-lang {
-    position: absolute;
-    z-index: 12;
-    top: 15cqw;
-    left: 50%;
-    display: inline-flex;
-    align-items: center;
-    gap: 1.6cqw;
-    padding: 1.6cqw 3.6cqw;
-    border-radius: 99px;
-    background: var(--accent);
-    color: #000000;
-    font-size: 3.7cqw;
-    font-weight: 700;
-    line-height: 1.1;
-    white-space: nowrap;
-    opacity: 0;
-    transform: translate(-50%, -2cqw);
-    transition:
-      opacity 0.35s ease,
-      transform 0.45s var(--ease);
-  }
-  .dc-lang[data-on] {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
-  .dc-lang > svg {
-    width: 4.4cqw;
-    height: 4.4cqw;
   }
 
   /* The pause button freezes every running animation where it is. */
@@ -1345,23 +1286,6 @@ body:has(.sl-new) {
     opacity: 1;
     transform: none;
   }
-  .sl-new .g-alert {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 4px 10px 4px 8px;
-    border-radius: 99px;
-    background: var(--alert);
-    color: #ffffff;
-    font-size: 12.5px;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-  }
-  .sl-new .g-alert > svg {
-    width: 14px;
-    height: 14px;
-  }
   .sl-new .g-recall p {
     margin: 9px 0 0;
     font-size: 17px;
@@ -1385,6 +1309,27 @@ body:has(.sl-new) {
   }
   .sl-new .g-uses b {
     color: #0a0a0a;
+  }
+  /* Found online: the answer, neutral, with where it came from. */
+  .sl-new .g-found {
+    background: #f2f2f7;
+    box-shadow: none;
+  }
+  .sl-new .g-found .g-src {
+    background: #ffffff;
+  }
+  .sl-new .g-found p {
+    margin-top: 8px;
+  }
+  /* No recall: a quiet green check, not an alarm. */
+  .sl-new .g-clear {
+    align-items: center;
+  }
+  .sl-new .g-clear > svg {
+    flex: none;
+    width: 19px;
+    height: 19px;
+    color: #248a3d;
   }
   .sl-new .g-sources {
     margin: 12px 0 0;

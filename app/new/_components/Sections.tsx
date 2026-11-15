@@ -6,21 +6,34 @@ import {
   Check,
   ChevronDown,
   Clock,
+  Cookie,
   CupSoda,
   ExternalLink,
   Globe,
   Images,
   Mic,
   Package,
-  Pill,
   Scan,
   Search,
   Settings,
-  TriangleAlert,
+  ShieldCheck,
   UtensilsCrossed,
 } from "lucide-react";
 
-import { Brackets, ModeChip, Phone, Scene, Sheet, Wave, Words, boxStyle, on, wordCount, wordsAt } from "./demo-parts";
+import {
+  Brackets,
+  MENU,
+  ModeChip,
+  Phone,
+  Scene,
+  Sheet,
+  Wave,
+  Words,
+  boxStyle,
+  on,
+  wordCount,
+  wordsAt,
+} from "./demo-parts";
 import { Reveal, StageToggle, useStage, type Stage } from "./motion";
 
 /* ------------------------------------------------------------------------ */
@@ -112,9 +125,10 @@ function FeatureRow({
 /* 1. How it works                                                           */
 /* ------------------------------------------------------------------------ */
 
-const HOW_SUMMARY = "Harbor Table lunch menu: starters, mains and desserts, 7 to 24 dollars.";
+// The live /api/analyze answer for the menu photo, trimmed to fit.
+const HOW_SUMMARY = "Retro Family Restaurant menu: six sections, 1.99 to 16.49 dollars.";
 const HOW_QUESTION = "How much was the first one?";
-const HOW_ANSWER = "Tomato Basil Soup is 7 dollars and 50 cents.";
+const HOW_ANSWER = "The Grilled Chicken Plate is 12 dollars and 79 cents.";
 
 const STEPS = [
   { name: "Point", body: "Aim at a menu, a can, a medicine box or a sign.", from: 0, to: 2300 },
@@ -168,7 +182,7 @@ export function HowItWorks() {
           stageRef={stageRef}
           stage={stage}
           label="how it works"
-          description={`A phone points at the Harbor Table lunch menu. Yellow brackets lock on, and SightLine says: ${HOW_SUMMARY} Then you hold the mic and ask, “${HOW_QUESTION}” It answers: ${HOW_ANSWER}`}
+          description={`A phone points at the Retro Family Restaurant menu. Yellow brackets lock on, and SightLine says: ${HOW_SUMMARY} Then you hold the mic and ask, “${HOW_QUESTION}” It answers: ${HOW_ANSWER}`}
           className="stage-tall"
         >
           <div className="stage-chips md:hidden">
@@ -178,31 +192,19 @@ export function HowItWorks() {
               </span>
             ))}
           </div>
-          <Phone width="clamp(214px, 19vw, 248px)" screen="#7a6a5a">
-            <Scene
-              src="/new/menu.webp"
-              alt=""
-              ratio={[720, 960]}
-              width="112cqw"
-              top="1cqw"
-              fx={49}
-              sizes="260px"
-            >
+          <Phone width="clamp(214px, 19vw, 248px)" screen="#5d574e">
+            <Scene src={MENU.src} alt="" ratio={MENU.ratio} width="96cqw" top="15cqw" sizes="260px">
               <Brackets
                 show={t >= 200 && t < 2300}
-                box={t < 700 ? { l: -1, t: -1, w: 102, h: 72 } : { l: 4, t: 3, w: 92, h: 48 }}
+                box={t < 700 ? { l: -1.5, t: -1.5, w: 103, h: 103 } : { l: 1.5, t: 1.5, w: 97, h: 97 }}
               />
-              <span
-                className="dc-mark"
-                data-on={on(t >= 7100)}
-                style={boxStyle({ l: 6, t: 23.6, w: 86, h: 5.4 })}
-              />
+              <span className="dc-mark" data-on={on(t >= 7100)} style={boxStyle(MENU.firstRow)} />
             </Scene>
             {t < 5300 && <ModeChip>AUTO</ModeChip>}
             <div className="dc-pill" data-on={on(t >= 1000 && t < 2250)}>
               <Scan strokeWidth={2.4} />
               <span className="dc-pill-t">
-                <b>Harbor Table menu</b>
+                <b>Retro Family menu</b>
                 <span>Tap to read</span>
               </span>
               <span className="dc-ripple" data-on={on(t >= 1800)} />
@@ -219,7 +221,7 @@ export function HowItWorks() {
             </span>
             <Sheet
               show={sheetUp}
-              label={answering ? "Ask · Harbor Table menu" : "Menu · Label"}
+              label={answering ? "Ask · Retro Family menu" : "Menu · Label"}
               speaking={answering ? answered > 0 && t < 9300 : summary > 0 && t < 5100}
             >
               <p className="dc-say">
@@ -314,12 +316,14 @@ export function Answers() {
 /* 3. From the web                                                           */
 /* ------------------------------------------------------------------------ */
 
-const RECALL =
-  "Tylenol Extra Strength: recalled November 2025 for defective container. Check your lot number.";
+// The live /api/lookup answer for the Nutter Butter Bites photo. Only facts
+// it found online are shown; it confirmed no allergens, so none are listed.
+const WEB_SUMMARY = "Nutter Butter Bites are peanut butter sandwich cookies, 140 calories per 1 ounce pack.";
+const WEB_NUTRITION = "6 g fat, 1.5 g saturated fat, 105 mg sodium, 8 g added sugars.";
 const SOURCES = [
-  { tile: "F", title: "Enforcement report: Tylenol Extra Strength", site: "fda.gov" },
-  { tile: "O", title: "Drug label: acetaminophen 500 mg", site: "open.fda.gov" },
-  { tile: "F", title: "Recalls and safety alerts", site: "fda.gov" },
+  { tile: "F", title: "Nutter Butter Cookies, Peanut Butter, Bites", site: "fooducate.com" },
+  { tile: "G", title: "Nabisco Nutter Butter Bites Peanut Butter Sandwich Cookies", site: "giantfood.com" },
+  { tile: "H", title: "Nutter Butter Bites Peanut Butter Sandwich Cookies", site: "heb.com" },
 ];
 
 export function FromTheWeb() {
@@ -338,19 +342,19 @@ export function FromTheWeb() {
         stageRef={stageRef}
         stage={stage}
         label="web lookup"
-        description={`A “From the web” card searches for a Tylenol Extra Strength recall. The recall comes first, in red: ${RECALL} Then its sources appear: an FDA enforcement report, the openFDA drug label, and the FDA recalls page.`}
+        description={`A “From the web” card searches for Nutter Butter Bites. It finds, online: ${WEB_SUMMARY} Nutrition: ${WEB_NUTRITION} No recall found. Then its sources appear: Fooducate, Giant Food and H-E-B.`}
       >
         <div className="g-hold">
           <div className="g-card">
             <div className="g-meta">
               <span>From the web</span>
               <span className="g-count" data-on={on(t >= 4200)}>
-                3 sources
+                4 sources
               </span>
             </div>
             <div className="g-search" data-done={on(!searching)}>
               <Search strokeWidth={2.4} />
-              <span>Tylenol Extra Strength recall</span>
+              <span>Nutter Butter Bites, 1 oz</span>
               {searching ? (
                 <span className="g-dots">
                   <i />
@@ -361,20 +365,26 @@ export function FromTheWeb() {
                 <Check className="g-ok" strokeWidth={2.8} />
               )}
             </div>
-            <div className="g-recall" data-on={on(t >= 1500)}>
-              <span className="g-alert">
-                <TriangleAlert strokeWidth={2.6} />
-                Recall
+            <div className="g-recall g-found" data-on={on(t >= 1500)}>
+              <span className="g-src">
+                <Globe strokeWidth={2.2} />
+                Online
               </span>
-              <p>{RECALL}</p>
+              <p>{WEB_SUMMARY}</p>
             </div>
-            <div className="g-uses" data-on={on(t >= 2500)}>
-              <b>Uses</b>
-              <span>Pain reliever and fever reducer.</span>
+            <div className="g-uses g-clear" data-on={on(t >= 2300)}>
+              <ShieldCheck strokeWidth={2.4} />
+              <span>
+                <b>No recall found</b> in these results.
+              </span>
+            </div>
+            <div className="g-uses" data-on={on(t >= 2800)}>
+              <b>Nutrition</b>
+              <span>{WEB_NUTRITION}</span>
             </div>
             <ul className="g-sources">
               {SOURCES.map((s, i) => (
-                <li key={s.title} data-on={on(t >= 3100 + i * 550)}>
+                <li key={s.site} data-on={on(t >= 3300 + i * 550)}>
                   <span className="g-tile">{s.tile}</span>
                   <span className="g-source-t">
                     <b>{s.title}</b>
@@ -395,12 +405,12 @@ export function FromTheWeb() {
 /* 4. It remembers                                                           */
 /* ------------------------------------------------------------------------ */
 
-const MEMORY_Q = "How much was the salmon?";
-const MEMORY_A = "Grilled Salmon at Harbor Table, 24 dollars.";
+const MEMORY_Q = "How much was the Teriyaki Rice Bowl?";
+const MEMORY_A = "Teriyaki Rice Bowl at Retro Family Restaurant, 10 dollars and 49 cents.";
 const SCANS = [
-  { icon: UtensilsCrossed, title: "Harbor Table lunch menu", meta: "Menu / Label · 2 min ago" },
+  { icon: UtensilsCrossed, title: "Retro Family Restaurant menu", meta: "Menu / Label · 2 min ago" },
   { icon: CupSoda, title: "Kirkland Energy Drink, Orange", meta: "Menu / Label · 1 hr ago" },
-  { icon: Pill, title: "Tylenol Extra Strength", meta: "Menu / Label · Yesterday" },
+  { icon: Cookie, title: "Nutter Butter Bites", meta: "Menu / Label · Yesterday" },
 ];
 
 export function Remembers() {
@@ -421,7 +431,7 @@ export function Remembers() {
         stageRef={stageRef}
         stage={stage}
         label="history"
-        description={`Your recent scans: the Harbor Table lunch menu, a Kirkland energy drink and Tylenol Extra Strength. You ask, “${MEMORY_Q}” SightLine finds the menu and answers: ${MEMORY_A}`}
+        description={`Your recent scans: the Retro Family Restaurant menu, a Kirkland energy drink and Nutter Butter Bites. You ask, “${MEMORY_Q}” SightLine finds the menu and answers: ${MEMORY_A}`}
       >
         <div className="g-hold g-mem">
           <div className="g-card g-recent">
@@ -651,7 +661,7 @@ export function HandsFree() {
           </div>
           <div className="g-say-bubble g-reply" data-on={on(speaking)}>
             <Wave on={speaking && stage.status === "playing"} className="g-wave" />
-            Harbor Table lunch menu: starters, mains and desserts, 7 to 24 dollars.
+            {HOW_SUMMARY}
           </div>
         </div>
       </StageBox>
@@ -704,15 +714,7 @@ export function VoiceOverPanel() {
           </p>
           <div className="vo-art" aria-hidden>
             <Phone width="clamp(214px, 19vw, 244px)" screen="#7a6a5a">
-              <Scene
-                src="/new/menu.webp"
-                alt=""
-                ratio={[720, 960]}
-                width="118cqw"
-                top="20cqw"
-                fx={50}
-                sizes="260px"
-              />
+              <Scene src={MENU.src} alt="" ratio={MENU.ratio} width="118cqw" top="20cqw" fx={50} sizes="260px" />
               <div className="vo-top">
                 <span className="vo-detect">
                   <Scan strokeWidth={2.6} />

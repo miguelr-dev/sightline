@@ -27,6 +27,18 @@ export function wordsAt(t: number, start: number, perWord: number, total: number
 
 export const wordCount = (text: string) => text.split(" ").length;
 
+/** The Retro Family Restaurant menu photo, shared by every menu demo. Rows
+    are measured on the photo's own pixels (1200 × 1552), in percentages. */
+export const MENU = {
+  src: "/new/retro-menu.webp",
+  alt: "The Retro Family Restaurant menu: main course, salads and soups, rice and noodles, beverages, pizza and sides, each with a price.",
+  ratio: [900, 1164] as [number, number],
+  /** Main Course, first item: Grilled Chicken Plate, $12.79. */
+  firstRow: { l: 7.6, t: 34.3, w: 41.2, h: 4.5 } as Box,
+  /** Rice & Noodles, second item: Teriyaki Rice Bowl, $10.49. */
+  teriyakiRow: { l: 7.6, t: 63.7, w: 41.2, h: 4.5 } as Box,
+};
+
 /** The screen of an iPhone: dynamic island, home indicator, and whatever is on it. */
 export function Screen({
   screen,
