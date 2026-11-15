@@ -13,7 +13,6 @@ import { Reveal } from "./_components/motion";
 import {
   Answers,
   FromTheWeb,
-  HandsFree,
   HowItWorks,
   Remembers,
   VoiceOverPanel,
@@ -139,7 +138,6 @@ export default function NewLanding() {
         <FromTheWeb />
         <Remembers />
         <Voices />
-        <HandsFree />
         <Audiences />
         <VoiceOverPanel />
         <Privacy />
