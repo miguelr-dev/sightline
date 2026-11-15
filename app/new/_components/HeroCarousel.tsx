@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ChevronDown, Mic, Pause, Rewind, Scan, SkipForward, TriangleAlert } from "lucide-react";
+import { ChevronDown, Mic, Pause, Rewind, Scan, SkipForward } from "lucide-react";
 
 import {
   CoverflowCarousel,
@@ -198,64 +198,6 @@ function BarcodeDemo({ active, state }: DemoProps) {
 }
 
 /* ------------------------------------------------------------------------ */
-/* 3. Know what's inside                                                     */
-/* ------------------------------------------------------------------------ */
-
-// The live /api/analyze answer for this photo, word for word. "Contains
-// peanuts" is from the same answer's details, read on the package.
-const SNACK_LINE =
-  "Nutter Butter Bites peanut butter sandwich cookies, 1 ounce package, 140 calories per serving.";
-
-function SnackDemo({ active, state }: DemoProps) {
-  const t = useDemoClock(active, state, 6800, 6000);
-  const said = wordsAt(t, 2800, 170, SNACK_LINE.split(" ").length);
-  return (
-    <DemoCard
-      title={["Know what’s", "inside"]}
-      description={`SightLine spots a snack pouch, flags that it contains peanuts, and says: ${SNACK_LINE}`}
-      frozen={state.paused}
-    >
-      <Scene
-        eager
-        src="/new/nutter-butter.webp"
-        alt="A hand holding a red pouch of Nutter Butter Bites peanut butter sandwich cookies."
-        ratio={[720, 1520]}
-        fx={50}
-      >
-        <Brackets
-          show={t >= 200 && t < 2400}
-          box={t < 400 ? { l: 2, t: 9, w: 96, h: 50 } : { l: 6.5, t: 14, w: 89, h: 35 }}
-        />
-      </Scene>
-      <ModeChip>AUTO</ModeChip>
-      <div className="dc-pill" data-on={on(t >= 1100 && t < 2250)} aria-hidden>
-        <Scan strokeWidth={2.4} />
-        <span className="dc-pill-t">
-          <b>Nutter Butter Bites</b>
-          <span>Tap to read</span>
-        </span>
-        <span className="dc-ripple" data-on={on(t >= 1850)} />
-      </div>
-      <Sheet
-        show={t >= 2300}
-        label="Auto · Label"
-        speaking={said > 0 && t < 5300}
-        badge={
-          <span className="dc-alert dc-alert-warn" data-on={on(t >= 2650)}>
-            <TriangleAlert strokeWidth={2.6} />
-            Peanuts
-          </span>
-        }
-      >
-        <p className="dc-say">
-          <Words text={SNACK_LINE} shown={said} />
-        </p>
-      </Sheet>
-    </DemoCard>
-  );
-}
-
-/* ------------------------------------------------------------------------ */
 /* 4. Ask about the menu                                                     */
 /* ------------------------------------------------------------------------ */
 
@@ -394,7 +336,6 @@ function SignDemo({ active, state }: DemoProps) {
 const SLIDES: CoverflowSlide[] = [
   { label: "Point at anything", duration: 6500, render: (a, s) => <PointDemo active={a} state={s} /> },
   { label: "Scan any barcode", duration: 6500, render: (a, s) => <BarcodeDemo active={a} state={s} /> },
-  { label: "Know what’s inside", duration: 6500, render: (a, s) => <SnackDemo active={a} state={s} /> },
   { label: "Ask about the menu", duration: 6700, render: (a, s) => <MenuDemo active={a} state={s} /> },
   { label: "Read any book aloud", duration: 6900, render: (a, s) => <BookDemo active={a} state={s} /> },
   { label: "Read any sign", duration: 6700, render: (a, s) => <SignDemo active={a} state={s} /> },
