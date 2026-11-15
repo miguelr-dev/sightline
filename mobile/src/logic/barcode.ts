@@ -123,3 +123,11 @@ export function pickCard<B extends AnyCard, F extends AnyCard>(barcode: B | null
 export function frameCheckAllowed(o: { barcodeCard: boolean; confirming: boolean }): boolean {
   return !o.barcodeCard && !o.confirming;
 }
+
+/** What to search the web for after a barcode read ("" = no lookup). Brand first when missing. */
+export function barcodeWebQuery(b: { found: boolean; title?: string; brand?: string }): string {
+  const title = (b.title ?? "").trim();
+  if (!b.found || !title) return "";
+  const brand = (b.brand ?? "").trim();
+  return brand && !title.toLowerCase().includes(brand.toLowerCase()) ? `${brand} ${title}` : title;
+}

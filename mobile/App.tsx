@@ -76,7 +76,7 @@ import { BookView } from "./src/components/BookView";
 import { useTurnDetector } from "./src/useTurnDetector";
 import { analyzeModeFor, autoRetry, barcodeAction, concreteMode, detectAllowedIn, frameCheckMode, headerLabel, STRIP_LABELS, STRIP_MODES, type StripMode } from "./src/logic/modeStrip";
 import { webSpeechPolicy, type WebTrigger } from "./src/logic/webSpeech";
-import { initialBarcodeState, normalizeBarcode, reduceBarcode, type BarcodeEvent } from "./src/logic/barcode";
+import { barcodeWebQuery, initialBarcodeState, normalizeBarcode, reduceBarcode, type BarcodeEvent } from "./src/logic/barcode";
 import {
   buildLookingRequest,
   fallbackFor,
@@ -679,12 +679,21 @@ function Main() {
     setBarcodeCard(null);
     silence();
     const token = speakToken.current;
+    const webQuery = barcodeWebQuery(b);
     const next: Shot = {
       id: nextId.current++,
       photo: b.image ? { uri: b.image, base64: "", width: 1, height: 1 } : null,
       mode: "menu",
       language: live.current.settings.language,
-      result: { spokenText: b.spokenText, details: "", sections: b.sections, itemKind: b.itemKind, scanId: b.scanId, error: !b.found },
+      result: {
+        spokenText: b.spokenText,
+        details: "",
+        sections: b.sections,
+        itemKind: b.itemKind,
+        scanId: b.scanId,
+        error: !b.found,
+        ...(webQuery ? { webQuery, brand: b.brand } : {}),
+      },
       followUps: [],
       web: { status: "idle" },
       fromHistory: true, // no photo data: no follow-ups or retry
@@ -695,6 +704,8 @@ function Main() {
     setSheet("result");
     haptic.success();
     say(b.spokenText, "en-US", { token });
+    // Check the web on its own, like a camera scan: the card fills in silently, with Listen.
+    if (webQuery) void runLookup(next, true);
   };
 
   const dismissBarcode = () => {
