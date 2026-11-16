@@ -8,6 +8,7 @@ SightLine is an AI copilot for blind and low-vision people, and for anyone who c
 - **Web app:** https://sightline.study/app, in any phone browser, with nothing to install
 - **iPhone app:** [mobile/](mobile/README.md) (React Native, runs in Expo Go)
 - **Glasses camera:** [hardware/](hardware/xiao-cam/README.md) (ESP32-S3 camera board)
+- **Devpost:** https://devpost.com/software/sightline-qcv2d8 (demo video and write-up)
 
 Built at SanD Hacks Fall 2026, UC San Diego.
 
